@@ -2,19 +2,40 @@ package com.bianzu.bianzu_backend.model.dto;
 
 import lombok.Data;
 
+import java.util.ArrayList;
 import java.util.List;
 
 @Data
 public class FormationPlanDTO {
     private String planId;
-    private String paradigm; // 联合范式：空空联合, 空地联合, 地地联合
-    private Double fitnessScore; // 算法适应度
-    private List<AllocationDetail> details; // 具体火力分配详情
+    private String planName;
+    private String paradigm;
+    private Boolean feasible;
+    private String summary;
+    private Double fitnessScore;
+    private Double distanceScore;
+    private Double firepowerScore;
+    private Double defenseScore;
+    private Double coverageScore;
+    private Double expectedInterceptionRate;
+    private Double estimatedCost;
+    private Integer groupSize;
+    private Integer allocatedEnemyCount;
+    private List<String> participatingDomains = new ArrayList<>();
+    private List<String> warnings = new ArrayList<>();
+    private List<AllocationDetail> details = new ArrayList<>();
 
     @Data
     public static class AllocationDetail {
         private String weaponNodeId;
+        private String weaponType;
+        private String fireType;
         private String targetEnemyId;
-        private String deployDomain; // 冗余字段，方便前端判断是"地"还是"空"
+        private String targetEnemyType;
+        private String sourceZoneId;
+        private String deployDomain;
+        private Double distanceKm;
+        private Double assignmentScore;
+        private Double estimatedInterceptionRate;
     }
 }

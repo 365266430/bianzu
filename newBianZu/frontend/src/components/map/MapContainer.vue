@@ -1,52 +1,72 @@
-<!-- views/main_map.vue -->
-<template>
+﻿<template>
   <MapToolbar
-      @resource-type-info="showResourceModal = true"
+    @resource-type-info="showResourceModal = true"
+    @pso-fire-allot="openFormationModal('allocation')"
+    @static-group-generate="openFormationModal('plans')"
   />
+
   <div ref="mapContainer" class="w-full h-screen"></div>
-  <!-- 只有在地图加载完成后才渲染 MapMarkers -->
-  <MapMarkers v-if="mapLoaded" :protectors="protectors"></MapMarkers>
-  <MapControls v-if="mapLoaded" :protectors="protectors"/>
-  <ModalWindow :show="showResourceModal" @close="showResourceModal = false" title="战场资源类型数据库" width="800px" height="600px">
-    <ResourceDashboard/>
+  <MapMarkers v-if="mapLoaded" />
+  <MapControls v-if="mapLoaded" />
+
+  <ModalWindow
+    :show="showResourceModal"
+    title="战场资源类型数据库"
+    width="800px"
+    height="600px"
+    @close="showResourceModal = false"
+  >
+    <ResourceDashboard />
   </ModalWindow>
+
+  <ModalWindow
+    :show="showFormationModal"
+    title="静态编组与火力分配"
+    width="1260px"
+    height="82vh"
+    max-height="82vh"
+    @close="showFormationModal = false"
+  >
+    <StaticFormationPanel :default-tab="formationTab" />
+  </ModalWindow>
+
   <ControlPanel />
-  <!-- <MarkerManageWindow v-if="isMarkerManageWindow" @generate-protector="handleNewProtector" ></MarkerManageWindow> -->
 </template>
 
 <script setup>
-import { ref, inject, onMounted, provide, shallowRef } from 'vue';
-import { createMap } from '@/plugins/leaflet';
-import MapMarkers from './MapMarkers.vue';
-import MapControls from './MapControls.vue';
-import MapToolbar from './MapToolbar.vue';
-import ControlPanel from './sub-units/ControlPanel.vue';
-import ResourceDashboard from '../ui/resourse/ResourceDashboard.vue';
-import ModalWindow from '../ui/common/ModalWindow.vue';
+import { inject, onMounted, provide, ref, shallowRef } from 'vue'
+import { createMap } from '@/plugins/leaflet'
+import MapMarkers from './MapMarkers.vue'
+import MapControls from './MapControls.vue'
+import MapToolbar from './MapToolbar.vue'
+import ControlPanel from './sub-units/ControlPanel.vue'
+import ResourceDashboard from '../ui/resourse/ResourceDashboard.vue'
+import StaticFormationPanel from '../ui/formation/StaticFormationPanel.vue'
+import ModalWindow from '../ui/common/ModalWindow.vue'
 
-const mapContainer = ref(null);
-const L = inject('L');
-const map = shallowRef(null);
-const mapLoaded = ref(false);
+const mapContainer = ref(null)
+const L = inject('L')
+const map = shallowRef(null)
+const mapLoaded = ref(false)
+const showResourceModal = ref(false)
+const showFormationModal = ref(false)
+const formationTab = ref('allocation')
 
-// 控制战场资源类型数据库模态框显示
-const showResourceModal = ref(false);
-
+function openFormationModal(tab) {
+  formationTab.value = tab
+  showFormationModal.value = true
+}
 
 onMounted(() => {
   if (L && mapContainer.value) {
     map.value = createMap(mapContainer.value, {
-      zoomControl: false, // 关键配置，关闭默认缩放控制
-      zoom: 4
-    });
-    // 提供地图实例
-    provide('map', map.value);
-    // 标记地图已加载
-    mapLoaded.value = true;
+      zoomControl: false,
+      zoom: 4,
+    })
+    provide('map', map.value)
+    mapLoaded.value = true
   }
-
-});
-
+})
 </script>
 
 <style scoped>
