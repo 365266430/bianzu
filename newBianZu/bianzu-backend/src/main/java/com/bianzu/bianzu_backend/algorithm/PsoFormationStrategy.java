@@ -10,7 +10,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
-
+/**
+ * 粒子群算法
+ */
 @Component("psoFormationStrategy")
 public class PsoFormationStrategy implements FormationStrategy {
 

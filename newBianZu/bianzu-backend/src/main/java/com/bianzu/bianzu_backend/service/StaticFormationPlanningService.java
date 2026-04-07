@@ -24,7 +24,9 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
-
+/**
+ * 静态阵型规划服务
+ */
 @Service
 public class StaticFormationPlanningService {
 
@@ -203,11 +205,13 @@ public class StaticFormationPlanningService {
         plan.setParticipatingDomains(eligible.stream().map(resource -> resource.deployDomain).distinct().toList());
         plan.setGroupSize((int) eligible.stream().map(resource -> resource.node.getId()).distinct().count());
 
+        boolean hasEligibleResources = !eligible.isEmpty();
+        boolean domainCoverageSatisfied = coversRequiredDomains(requiredDomains, eligible);
         List<String> warnings = new ArrayList<>();
-        if (!coversRequiredDomains(requiredDomains, eligible)) {
+        if (!domainCoverageSatisfied) {
             warnings.add("Insufficient domain coverage in current static posture.");
         }
-        if (eligible.isEmpty()) {
+        if (!hasEligibleResources) {
             warnings.add("No eligible weapon resources for this paradigm.");
         }
 
@@ -267,17 +271,16 @@ public class StaticFormationPlanningService {
         double coverage = enemies.isEmpty() ? 0D : allocationCount / (double) enemies.size();
         plan.setAllocatedEnemyCount(allocationCount);
         plan.setWarnings(warnings);
-        plan.setFeasible(allocationCount > 0);
+        boolean feasible = hasEligibleResources && domainCoverageSatisfied && allocationCount > 0;
+        plan.setFeasible(feasible);
         plan.setDistanceScore(round(avgPercent(distanceScoreSum, allocationCount)));
         plan.setFirepowerScore(round(avgPercent(firepowerScoreSum, allocationCount)));
         plan.setDefenseScore(round(avgPercent(defenseScoreSum, allocationCount)));
         plan.setCoverageScore(round(coverage * 100D));
         plan.setExpectedInterceptionRate(round(avgPercent(interceptionSum, allocationCount)));
         plan.setEstimatedCost(round(estimatedCost));
-        plan.setFitnessScore(round((plan.getDistanceScore() * 0.25D + plan.getFirepowerScore() * 0.35D + plan.getDefenseScore() * 0.2D + plan.getCoverageScore() * 0.2D) * (warnings.isEmpty() ? 1D : 0.88D)));
-        plan.setSummary(plan.getFeasible()
-                ? resolveAlgorithmName(algorithmType) + " produced " + allocationCount + " static assignments for " + paradigm + "."
-                : "No executable assignment was found for " + paradigm + ".");
+        plan.setFitnessScore(round(computeFitnessScore(plan, algorithmType, config, hasEligibleResources, domainCoverageSatisfied)));
+        plan.setSummary(resolvePlanSummary(plan, algorithmType, paradigm, allocationCount, hasEligibleResources, domainCoverageSatisfied));
         return plan;
     }
 
@@ -308,11 +311,12 @@ public class StaticFormationPlanningService {
         double distanceFactor = resource.zone == null ? 0.55D : clamp(1D - distanceKm / rangeKm, 0D, 1D);
         double firepowerFactor = clamp(resource.interceptionRate * 0.7D + clamp(resource.ammoCount / 6D, 0D, 1D) * 0.3D, 0D, 1D);
         double defenseFactor = clamp((resource.zone == null ? 0.4D : defaultDouble(resource.zone.getValue()) / 3D) * 0.6D + threatScore(enemy, enemyType) / 100D * 0.4D, 0D, 1D);
+        double baseScore = ((distanceWeight * distanceFactor) + (firepowerWeight * firepowerFactor) + (defenseWeight * defenseFactor)) / totalWeight;
         double algorithmBias = switch (algorithmType) {
-            case "greedyFormationStrategy" -> firepowerFactor * 0.08D;
-            case "geneticFormationStrategy" -> defenseFactor * 0.06D;
-            case "antColonyFormationStrategy" -> distanceFactor * 0.05D;
-            default -> clamp((firepowerFactor + defenseFactor) / 2D, 0D, 1D) * 0.05D;
+            case "greedyFormationStrategy" -> firepowerFactor * 0.18D + clamp(resource.ammoCount / 8D, 0D, 1D) * 0.05D;
+            case "geneticFormationStrategy" -> computeBalanceFactor(distanceFactor, firepowerFactor, defenseFactor) * 0.16D + defenseFactor * 0.05D;
+            case "antColonyFormationStrategy" -> distanceFactor * 0.2D + clamp(1D - distanceKm / 300D, 0D, 1D) * 0.08D;
+            default -> ((distanceFactor + firepowerFactor + defenseFactor) / 3D) * 0.12D + computeBalanceFactor(distanceFactor, firepowerFactor, defenseFactor) * 0.04D;
         };
 
         ScoredAssignment assignment = new ScoredAssignment();
@@ -322,8 +326,71 @@ public class StaticFormationPlanningService {
         assignment.distanceFactor = distanceFactor;
         assignment.firepowerFactor = firepowerFactor;
         assignment.defenseFactor = defenseFactor;
-        assignment.totalScore = ((distanceWeight * distanceFactor) + (firepowerWeight * firepowerFactor) + (defenseWeight * defenseFactor)) / totalWeight + algorithmBias;
+        assignment.totalScore = clamp(baseScore + algorithmBias, 0D, 1.35D);
         return assignment;
+    }
+
+    private double computeFitnessScore(FormationPlanDTO plan,
+                                       String algorithmType,
+                                       AlgorithmConfigDTO config,
+                                       boolean hasEligibleResources,
+                                       boolean domainCoverageSatisfied) {
+        double distanceWeight = config == null || config.getDistanceWeight() == null ? 0.34D : config.getDistanceWeight();
+        double firepowerWeight = config == null || config.getFirepowerWeight() == null ? 0.38D : config.getFirepowerWeight();
+        double defenseWeight = config == null || config.getDefenseWeight() == null ? 0.28D : config.getDefenseWeight();
+        double totalWeight = Math.max(distanceWeight + firepowerWeight + defenseWeight, 0.01D);
+
+        double weightedOperationalScore = (plan.getDistanceScore() * distanceWeight
+                + plan.getFirepowerScore() * firepowerWeight
+                + plan.getDefenseScore() * defenseWeight) / totalWeight;
+        double algorithmProfileScore = computeAlgorithmProfileScore(algorithmType, plan);
+        double rawScore = weightedOperationalScore * 0.72D + algorithmProfileScore * 0.18D + plan.getCoverageScore() * 0.10D;
+
+        if (!hasEligibleResources) {
+            rawScore *= 0.08D;
+        } else if (!domainCoverageSatisfied) {
+            rawScore *= 0.35D;
+        } else if (!Boolean.TRUE.equals(plan.getFeasible())) {
+            rawScore *= 0.22D;
+        }
+
+        return clamp(rawScore, 0D, 100D);
+    }
+
+    private double computeAlgorithmProfileScore(String algorithmType, FormationPlanDTO plan) {
+        double balanceScore = computeBalanceScore(plan.getDistanceScore(), plan.getFirepowerScore(), plan.getDefenseScore());
+        return clamp(switch (algorithmType) {
+            case "greedyFormationStrategy" -> plan.getFirepowerScore() * 0.78D + plan.getCoverageScore() * 0.22D;
+            case "geneticFormationStrategy" -> balanceScore * 0.5D + plan.getDefenseScore() * 0.3D + plan.getCoverageScore() * 0.2D;
+            case "antColonyFormationStrategy" -> plan.getDistanceScore() * 0.7D + plan.getCoverageScore() * 0.3D;
+            default -> ((plan.getDistanceScore() + plan.getFirepowerScore() + plan.getDefenseScore()) / 3D) * 0.75D + plan.getCoverageScore() * 0.25D;
+        }, 0D, 100D);
+    }
+
+    private String resolvePlanSummary(FormationPlanDTO plan,
+                                      String algorithmType,
+                                      String paradigm,
+                                      int allocationCount,
+                                      boolean hasEligibleResources,
+                                      boolean domainCoverageSatisfied) {
+        if (!hasEligibleResources) {
+            return "No eligible weapon resources were found for " + paradigm + ".";
+        }
+        if (!domainCoverageSatisfied) {
+            return "Only partial assignments were produced; current static posture cannot satisfy the required domains for " + paradigm + ".";
+        }
+        if (!Boolean.TRUE.equals(plan.getFeasible())) {
+            return "No executable assignment was found for " + paradigm + ".";
+        }
+        return resolveAlgorithmName(algorithmType) + " produced " + allocationCount + " static assignments for " + paradigm + ".";
+    }
+
+    private double computeBalanceScore(double first, double second, double third) {
+        return clamp(100D - (Math.abs(first - second) + Math.abs(second - third) + Math.abs(first - third)) / 3D, 0D, 100D);
+    }
+
+    private double computeBalanceFactor(double first, double second, double third) {
+        return computeBalanceScore(first * 100D, second * 100D, third * 100D) / 100D;
     }
 
     private double threatScore(EnemyNode enemy, EnemyType enemyType) {

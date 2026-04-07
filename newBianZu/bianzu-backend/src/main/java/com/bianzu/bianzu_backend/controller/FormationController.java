@@ -14,6 +14,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Map;
+/**
+ * 静态编组控制器
+ */
 
 @RestController
 @RequestMapping("/formation")

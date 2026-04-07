@@ -10,7 +10,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
-
+/**
+ * 遗传算法
+ */
 @Component("geneticFormationStrategy")
 public class GeneticFormationStrategy implements FormationStrategy {
 

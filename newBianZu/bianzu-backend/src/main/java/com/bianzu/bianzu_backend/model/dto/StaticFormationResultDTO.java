@@ -4,6 +4,9 @@ import lombok.Data;
 
 import java.util.ArrayList;
 import java.util.List;
+/**
+ * 静态编队结果数据传输对象
+ */
 
 @Data
 public class StaticFormationResultDTO {

@@ -11,6 +11,9 @@ import org.springframework.stereotype.Component;
 
 import java.util.List;
 
+    /**
+    蚁群算法
+     */
 @Component("antColonyFormationStrategy")
 public class AntColonyFormationStrategy implements FormationStrategy {
 

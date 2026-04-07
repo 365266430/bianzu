@@ -4,7 +4,9 @@ import lombok.Data;
 
 import java.util.ArrayList;
 import java.util.List;
-
+/**
+ * 编队方案数据传输对象
+ */
 @Data
 public class FormationPlanDTO {
     private String planId;
