@@ -1,89 +1,117 @@
-<template>
+﻿<template>
   <div></div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, inject } from 'vue';
-import type {EnemyNode} from '@/model/enemy';
-import type { ProtectionZone } from '@/model/protectionZone';
-import { type Map, type CircleMarker, circle } from 'leaflet';
-import { wsClient } from '@/utils/websocket';
-import { createEnemy,createZone } from '@/composables/useMarkers';
+import { onMounted, onUnmounted, inject } from 'vue'
+import L from 'leaflet'
+import type { Map, CircleMarker, Layer } from 'leaflet'
+import type { EnemyNode } from '@/model/enemy'
+import type { ProtectionZone } from '@/model/protectionZone'
+import { wsClient } from '@/utils/websocket'
+import { createEnemy, createZone } from '@/composables/useMarkers'
+import { dispatchMapContextMenu } from '@/utils/mapContextMenu'
 
-const map = inject<Map>('map'); // 确保地图实例已注入
+const map = inject<Map>('map')
 if (!map) {
-  throw new Error('Map instance not provided via inject("map")');
+  throw new Error('Map instance not provided via inject("map")')
 }
 
-// 存储当前在地图上的敌方标记，更新时先清除再重建
-let enemyMarkers: CircleMarker[] = [];
-let zoneMarkers: CircleMarker[] = [];
+let enemyMarkers: CircleMarker[] = []
+let zoneLayers: Layer[] = []
 
-
-// 定义一个处理函数
 const handleEnemyUpdate = (enemies: EnemyNode[]) => {
-  // 更新 Leaflet 地图
-  // updateLayer(enemies)...
-  console.log("收到敌人数据:", enemies.length);
-  updateEnemies(enemies);
+  updateEnemies(enemies)
+}
 
-};
 const handleZoneUpdate = (zones: ProtectionZone[]) => {
-  // 更新 Leaflet 地图
-  // updateLayer(enemies)...
-  console.log("收到保护区数据:", zones.length);
-  console.log(zones);
-  updateZones(zones);
-};
+  updateZones(zones)
+}
 
 onMounted(() => {
-  // 订阅 'ENEMY_UPDATE' 类型的消息
-  // 注意：这个 type 字符串要和后端 WebSocketMessage.type 保持一致！
-  wsClient.subscribe('ENEMY_UPDATE', handleEnemyUpdate);
-  wsClient.subscribe('ZONE_UPDATE', handleZoneUpdate);
-
-  // createEnemy(map, [ 39.915,116.404]);
-});
+  wsClient.subscribe('ENEMY_UPDATE', handleEnemyUpdate)
+  wsClient.subscribe('ZONE_UPDATE', handleZoneUpdate)
+})
 
 onUnmounted(() => {
-  // 清理地图上的敌方标记
-  clearEnemyMarkers();
-  // 记得取消订阅，防止内存泄漏
-  wsClient.unsubscribe('ENEMY_UPDATE', handleEnemyUpdate);
-  wsClient.unsubscribe('ZONE_UPDATE', handleZoneUpdate);
-});
+  clearEnemyMarkers()
+  clearZoneLayers()
+  wsClient.unsubscribe('ENEMY_UPDATE', handleEnemyUpdate)
+  wsClient.unsubscribe('ZONE_UPDATE', handleZoneUpdate)
+})
 
 const updateEnemies = (enemies: EnemyNode[]) => {
-  // 先移除已有的敌方 marker，保证地图上只保留最新一批
-  clearEnemyMarkers();
+  clearEnemyMarkers()
 
   for (const enemy of enemies) {
-    const marker = createEnemy(map, [enemy.latitude, enemy.longitude]);
-    // 保存以便下次清理
-    enemyMarkers.push(marker as CircleMarker);
+    const marker = createEnemy(map, [enemy.latitude, enemy.longitude])
+    marker.on('contextmenu', (event: any) => {
+      event.originalEvent.preventDefault()
+      event.originalEvent.stopPropagation()
+      L.DomEvent.stop(event.originalEvent)
+      dispatchMapContextMenu({
+        x: event.originalEvent.clientX,
+        y: event.originalEvent.clientY,
+        target: { kind: 'enemy', id: String(enemy.id), enemy },
+      })
+    })
+    enemyMarkers.push(marker as CircleMarker)
   }
-};
+}
 
 const updateZones = (zones: ProtectionZone[]) => {
+  clearZoneLayers()
 
   for (const zone of zones) {
-    const {marker, circle} = createZone(map, zone.location, 1000000);
-    // 保存以便下次清理
-    zoneMarkers.push(marker as CircleMarker);
+    if (!Array.isArray(zone.location) || zone.location.length < 2) {
+      continue
+    }
+
+    const lat = Number(zone.location[1])
+    const lng = Number(zone.location[0])
+    const radius = Number(zone.size ?? 1000000)
+    const { marker, circle } = createZone(map, [lat, lng], radius)
+
+    const handleZoneContextMenu = (event: any) => {
+      event.originalEvent.preventDefault()
+      event.originalEvent.stopPropagation()
+      L.DomEvent.stop(event.originalEvent)
+      dispatchMapContextMenu({
+        x: event.originalEvent.clientX,
+        y: event.originalEvent.clientY,
+        target: { kind: 'zone', id: String(zone.id), zone },
+      })
+    }
+
+    marker.on('contextmenu', handleZoneContextMenu)
+    circle.on('contextmenu', handleZoneContextMenu)
+
+    zoneLayers.push(marker as Layer)
+    zoneLayers.push(circle as Layer)
   }
-};
+}
 
 function clearEnemyMarkers() {
   try {
-    for (const m of enemyMarkers) {
-      if (m && map) {
-        // map.removeLayer 接受任何 L.Layer（CircleMarker 是 Layer）
-        map.removeLayer(m as any);
+    for (const marker of enemyMarkers) {
+      if (marker && map) {
+        map.removeLayer(marker as any)
       }
     }
   } finally {
-    enemyMarkers = [];
+    enemyMarkers = []
   }
 }
 
+function clearZoneLayers() {
+  try {
+    for (const layer of zoneLayers) {
+      if (layer && map) {
+        map.removeLayer(layer)
+      }
+    }
+  } finally {
+    zoneLayers = []
+  }
+}
 </script>
