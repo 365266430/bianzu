@@ -25,7 +25,9 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 /**
- * 静态阵型规划服务
+ * @Author dongjun
+ * @Date 2026/4/8 15:08
+ *静态编组规划服务
  */
 @Service
 public class StaticFormationPlanningService {

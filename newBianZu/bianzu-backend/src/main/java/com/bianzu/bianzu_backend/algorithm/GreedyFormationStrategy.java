@@ -11,7 +11,9 @@ import org.springframework.stereotype.Component;
 
 import java.util.List;
 /**
- * 贪心策略
+ * @Author dongjun
+ * @Date 2026/4/8 15:08
+ *贪心策略
  */
 @Component("greedyFormationStrategy")
 public class GreedyFormationStrategy implements FormationStrategy {

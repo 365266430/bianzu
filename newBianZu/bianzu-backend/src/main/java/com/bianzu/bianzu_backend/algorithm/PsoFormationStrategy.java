@@ -11,7 +11,9 @@ import org.springframework.stereotype.Component;
 
 import java.util.List;
 /**
- * 粒子群算法
+ * @Author dongjun
+ * @Date 2026/4/8 15:08
+ *粒子群算法
  */
 @Component("psoFormationStrategy")
 public class PsoFormationStrategy implements FormationStrategy {
