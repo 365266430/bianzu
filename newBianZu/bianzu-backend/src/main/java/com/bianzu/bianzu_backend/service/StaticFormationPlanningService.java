@@ -69,7 +69,7 @@ public class StaticFormationPlanningService {
         List<WeaponResource> resources = buildWeaponResources(weapons, weaponTypes, fireTypes, zoneByWeaponId, safeZones);
         List<String> paradigms = resolveParadigms(config);
         List<FormationPlanDTO> plans = paradigms.stream()
-                .map(paradigm -> buildPlan(paradigm, algorithmType, config, resources, enemies, enemyTypes))
+                .map(paradigm -> buildPlan(paradigm, algorithmType, config, resources, enemies, enemyTypes, safeZones))
                 .sorted(Comparator.comparing(FormationPlanDTO::getFitnessScore, Comparator.nullsLast(Comparator.reverseOrder())))
                 .toList();
 
@@ -182,7 +182,8 @@ public class StaticFormationPlanningService {
                                        AlgorithmConfigDTO config,
                                        List<WeaponResource> resources,
                                        List<EnemyNode> enemies,
-                                       Map<String, EnemyType> enemyTypes) {
+                                       Map<String, EnemyType> enemyTypes,
+                                       List<ProtectionZone> zones) {
         List<String> requiredDomains = switch (paradigm) {
             case "AIR_GROUND" -> List.of("AIR", "GROUND");
             case "GROUND_GROUND" -> List.of("GROUND", "GROUND");
@@ -217,8 +218,9 @@ public class StaticFormationPlanningService {
             warnings.add("No eligible weapon resources for this paradigm.");
         }
 
-        List<EnemyNode> sortedEnemies = enemies.stream()
-                .sorted(Comparator.comparingDouble((EnemyNode enemy) -> threatScore(enemy, enemyTypes.get(enemy.getType()))).reversed())
+        List<EnemyPriorityProfile> prioritizedEnemies = enemies.stream()
+                .map(enemy -> buildEnemyPriorityProfile(enemy, enemyTypes.get(enemy.getType()), zones))
+                .sorted(Comparator.comparingDouble((EnemyPriorityProfile profile) -> profile.totalPriority).reversed())
                 .toList();
 
         Map<String, Integer> remainingAmmo = eligible.stream().collect(Collectors.toMap(resource -> resource.node.getId() + "|" + resource.fireType.getType(), resource -> resource.ammoCount));
@@ -230,50 +232,42 @@ public class StaticFormationPlanningService {
         double interceptionSum = 0D;
         double estimatedCost = 0D;
 
-        for (EnemyNode enemy : sortedEnemies) {
-            ScoredAssignment best = null;
-            for (WeaponResource resource : eligible) {
-                String ammoKey = resource.node.getId() + "|" + resource.fireType.getType();
-                if (remainingAmmo.getOrDefault(ammoKey, 0) <= 0 || remainingChannels.getOrDefault(resource.node.getId(), 0) <= 0) {
-                    continue;
-                }
-                ScoredAssignment current = scoreAssignment(resource, enemy, enemyTypes.get(enemy.getType()), algorithmType, config);
-                if (best == null || current.totalScore > best.totalScore) {
-                    best = current;
-                }
-            }
-            if (best == null) {
-                continue;
-            }
+        List<ScoredAssignment> assignments = new ArrayList<>();
+        allocateAssignments(assignments, prioritizedEnemies.stream().filter(profile -> profile.baselineShots > 0).toList(), eligible, remainingAmmo, remainingChannels, algorithmType, config);
+        allocateAssignments(assignments, prioritizedEnemies.stream().filter(profile -> profile.additionalShots > 0).toList(), eligible, remainingAmmo, remainingChannels, algorithmType, config);
+        allocateAssignments(assignments, prioritizedEnemies.stream().filter(profile -> profile.deferredShots > 0).toList(), eligible, remainingAmmo, remainingChannels, algorithmType, config);
 
-            remainingAmmo.computeIfPresent(best.ammoKey, (key, value) -> Math.max(0, value - 1));
-            remainingChannels.computeIfPresent(best.resource.node.getId(), (key, value) -> Math.max(0, value - 1));
-
+        for (ScoredAssignment assignment : assignments) {
             FormationPlanDTO.AllocationDetail detail = new FormationPlanDTO.AllocationDetail();
-            detail.setWeaponNodeId(best.resource.node.getId());
-            detail.setWeaponType(best.resource.weaponType.getType());
-            detail.setFireType(best.resource.fireType.getType());
-            detail.setTargetEnemyId(enemy.getId());
-            detail.setTargetEnemyType(enemy.getType());
-            detail.setSourceZoneId(best.resource.zone == null ? "UNASSIGNED_ZONE" : best.resource.zone.getId());
-            detail.setDeployDomain(best.resource.deployDomain);
-            detail.setDistanceKm(round(best.distanceKm));
-            detail.setAssignmentScore(round(best.totalScore * 100D));
-            detail.setEstimatedInterceptionRate(round(best.resource.interceptionRate * 100D));
+            detail.setWeaponNodeId(assignment.resource.node.getId());
+            detail.setWeaponType(assignment.resource.weaponType.getType());
+            detail.setFireType(assignment.resource.fireType.getType());
+            detail.setTargetEnemyId(assignment.priorityProfile.enemy.getId());
+            detail.setTargetEnemyType(assignment.priorityProfile.enemy.getType());
+            detail.setSourceZoneId(assignment.resource.zone == null ? "UNASSIGNED_ZONE" : assignment.resource.zone.getId());
+            detail.setDeployDomain(assignment.resource.deployDomain);
+            detail.setDistanceKm(round(assignment.distanceKm));
+            detail.setAssignmentScore(round(assignment.totalScore * 100D));
+            detail.setEstimatedInterceptionRate(round(assignment.resource.interceptionRate * 100D));
             plan.getDetails().add(detail);
 
-            distanceScoreSum += best.distanceFactor;
-            firepowerScoreSum += best.firepowerFactor;
-            defenseScoreSum += best.defenseFactor;
-            interceptionSum += best.resource.interceptionRate;
-            estimatedCost += defaultDouble(best.resource.fireType.getCost());
+            distanceScoreSum += assignment.distanceFactor;
+            firepowerScoreSum += assignment.firepowerFactor;
+            defenseScoreSum += assignment.defenseFactor;
+            interceptionSum += assignment.resource.interceptionRate;
+            estimatedCost += defaultDouble(assignment.resource.fireType.getCost());
         }
 
-        int allocationCount = plan.getDetails().size();
-        double coverage = enemies.isEmpty() ? 0D : allocationCount / (double) enemies.size();
-        plan.setAllocatedEnemyCount(allocationCount);
+        int allocationCount = assignments.size();
+        int allocatedEnemyCount = (int) assignments.stream()
+                .map(assignment -> assignment.priorityProfile.enemy.getId())
+                .filter(Objects::nonNull)
+                .distinct()
+                .count();
+        double coverage = enemies.isEmpty() ? 0D : allocatedEnemyCount / (double) enemies.size();
+        plan.setAllocatedEnemyCount(allocatedEnemyCount);
         plan.setWarnings(warnings);
-        boolean feasible = hasEligibleResources && domainCoverageSatisfied && allocationCount > 0;
+        boolean feasible = hasEligibleResources && domainCoverageSatisfied && allocatedEnemyCount > 0;
         plan.setFeasible(feasible);
         plan.setDistanceScore(round(avgPercent(distanceScoreSum, allocationCount)));
         plan.setFirepowerScore(round(avgPercent(firepowerScoreSum, allocationCount)));
@@ -284,6 +278,66 @@ public class StaticFormationPlanningService {
         plan.setFitnessScore(round(computeFitnessScore(plan, algorithmType, config, hasEligibleResources, domainCoverageSatisfied)));
         plan.setSummary(resolvePlanSummary(plan, algorithmType, paradigm, allocationCount, hasEligibleResources, domainCoverageSatisfied));
         return plan;
+    }
+
+    private void allocateAssignments(List<ScoredAssignment> assignments,
+                                     List<EnemyPriorityProfile> profiles,
+                                     List<WeaponResource> eligible,
+                                     Map<String, Integer> remainingAmmo,
+                                     Map<String, Integer> remainingChannels,
+                                     String algorithmType,
+                                     AlgorithmConfigDTO config) {
+        for (EnemyPriorityProfile profile : profiles) {
+            int shotsToAllocate = resolveShotsForPass(profile);
+            for (int i = 0; i < shotsToAllocate; i++) {
+                ScoredAssignment best = chooseBestAssignment(profile, eligible, remainingAmmo, remainingChannels, algorithmType, config);
+                if (best == null) {
+                    break;
+                }
+                remainingAmmo.computeIfPresent(best.ammoKey, (key, value) -> Math.max(0, value - 1));
+                remainingChannels.computeIfPresent(best.resource.node.getId(), (key, value) -> Math.max(0, value - 1));
+                assignments.add(best);
+            }
+        }
+    }
+
+    private int resolveShotsForPass(EnemyPriorityProfile profile) {
+        if (profile.baselineShots > 0) {
+            int value = profile.baselineShots;
+            profile.baselineShots = 0;
+            return value;
+        }
+        if (profile.additionalShots > 0) {
+            int value = profile.additionalShots;
+            profile.additionalShots = 0;
+            return value;
+        }
+        if (profile.deferredShots > 0) {
+            int value = profile.deferredShots;
+            profile.deferredShots = 0;
+            return value;
+        }
+        return 0;
+    }
+
+    private ScoredAssignment chooseBestAssignment(EnemyPriorityProfile profile,
+                                                  List<WeaponResource> eligible,
+                                                  Map<String, Integer> remainingAmmo,
+                                                  Map<String, Integer> remainingChannels,
+                                                  String algorithmType,
+                                                  AlgorithmConfigDTO config) {
+        ScoredAssignment best = null;
+        for (WeaponResource resource : eligible) {
+            String ammoKey = resource.node.getId() + "|" + resource.fireType.getType();
+            if (remainingAmmo.getOrDefault(ammoKey, 0) <= 0 || remainingChannels.getOrDefault(resource.node.getId(), 0) <= 0) {
+                continue;
+            }
+            ScoredAssignment current = scoreAssignment(resource, profile, algorithmType, config);
+            if (best == null || current.totalScore > best.totalScore) {
+                best = current;
+            }
+        }
+        return best;
     }
 
     private boolean coversRequiredDomains(List<String> requiredDomains, List<WeaponResource> resources) {
@@ -299,8 +353,7 @@ public class StaticFormationPlanningService {
     }
 
     private ScoredAssignment scoreAssignment(WeaponResource resource,
-                                             EnemyNode enemy,
-                                             EnemyType enemyType,
+                                             EnemyPriorityProfile profile,
                                              String algorithmType,
                                              AlgorithmConfigDTO config) {
         double distanceWeight = config == null || config.getDistanceWeight() == null ? 0.34D : config.getDistanceWeight();
@@ -308,21 +361,28 @@ public class StaticFormationPlanningService {
         double defenseWeight = config == null || config.getDefenseWeight() == null ? 0.28D : config.getDefenseWeight();
         double totalWeight = Math.max(distanceWeight + firepowerWeight + defenseWeight, 0.01D);
 
-        double distanceKm = computeDistanceKm(resource.zone, enemy);
+        double distanceKm = computeDistanceKm(resource.zone, profile.enemy);
         double rangeKm = Math.max(defaultDouble(resource.fireType.getMaxRange()) / 1000D, 1D);
         double distanceFactor = resource.zone == null ? 0.55D : clamp(1D - distanceKm / rangeKm, 0D, 1D);
         double firepowerFactor = clamp(resource.interceptionRate * 0.7D + clamp(resource.ammoCount / 6D, 0D, 1D) * 0.3D, 0D, 1D);
-        double defenseFactor = clamp((resource.zone == null ? 0.4D : defaultDouble(resource.zone.getValue()) / 3D) * 0.6D + threatScore(enemy, enemyType) / 100D * 0.4D, 0D, 1D);
+        double zoneMatchFactor = resource.zone != null && Objects.equals(resource.zone.getId(), profile.priorityZoneId) ? 1D : 0D;
+        double protectionFactor = clamp((resource.zone == null ? 0.35D : defaultDouble(resource.zone.getValue()) / 3D) * 0.35D
+                + clamp(profile.zonePriority / 55D, 0D, 1D) * 0.4D
+                + zoneMatchFactor * 0.25D, 0D, 1D);
+        double defenseFactor = clamp(protectionFactor * 0.55D + clamp(profile.baseThreat / 100D, 0D, 1D) * 0.45D, 0D, 1D);
         double baseScore = ((distanceWeight * distanceFactor) + (firepowerWeight * firepowerFactor) + (defenseWeight * defenseFactor)) / totalWeight;
         double algorithmBias = switch (algorithmType) {
-            case "greedyFormationStrategy" -> firepowerFactor * 0.18D + clamp(resource.ammoCount / 8D, 0D, 1D) * 0.05D;
-            case "geneticFormationStrategy" -> computeBalanceFactor(distanceFactor, firepowerFactor, defenseFactor) * 0.16D + defenseFactor * 0.05D;
-            case "antColonyFormationStrategy" -> distanceFactor * 0.2D + clamp(1D - distanceKm / 300D, 0D, 1D) * 0.08D;
-            default -> ((distanceFactor + firepowerFactor + defenseFactor) / 3D) * 0.12D + computeBalanceFactor(distanceFactor, firepowerFactor, defenseFactor) * 0.04D;
+            case "greedyFormationStrategy" -> firepowerFactor * 0.16D + clamp(profile.totalPriority / 100D, 0D, 1D) * 0.08D;
+            case "geneticFormationStrategy" -> computeBalanceFactor(distanceFactor, firepowerFactor, defenseFactor) * 0.12D + defenseFactor * 0.08D + clamp(profile.zonePriority / 55D, 0D, 1D) * 0.04D;
+            case "antColonyFormationStrategy" -> distanceFactor * 0.18D + clamp(1D - distanceKm / 300D, 0D, 1D) * 0.06D + clamp(profile.zonePriority / 55D, 0D, 1D) * 0.05D;
+            default -> ((distanceFactor + firepowerFactor + defenseFactor) / 3D) * 0.08D
+                    + computeBalanceFactor(distanceFactor, firepowerFactor, defenseFactor) * 0.03D
+                    + clamp(profile.totalPriority / 100D, 0D, 1D) * 0.06D;
         };
 
         ScoredAssignment assignment = new ScoredAssignment();
         assignment.resource = resource;
+        assignment.priorityProfile = profile;
         assignment.ammoKey = resource.node.getId() + "|" + resource.fireType.getType();
         assignment.distanceKm = distanceKm;
         assignment.distanceFactor = distanceFactor;
@@ -395,11 +455,85 @@ public class StaticFormationPlanningService {
         return computeBalanceScore(first * 100D, second * 100D, third * 100D) / 100D;
     }
 
+    private EnemyPriorityProfile buildEnemyPriorityProfile(EnemyNode enemy,
+                                                           EnemyType enemyType,
+                                                           List<ProtectionZone> zones) {
+        EnemyPriorityProfile profile = new EnemyPriorityProfile();
+        profile.enemy = enemy;
+        profile.baseThreat = threatScore(enemy, enemyType);
+
+        ZonePriorityProfile zonePriority = resolveZonePriority(enemy, enemyType, zones);
+        profile.priorityZoneId = zonePriority.zoneId;
+        profile.zonePriority = zonePriority.score;
+        profile.totalPriority = profile.baseThreat + profile.zonePriority;
+
+        if (profile.totalPriority >= 80D || profile.zonePriority >= 30D || profile.baseThreat >= 55D) {
+            profile.baselineShots = 1;
+            profile.additionalShots = 1;
+            profile.deferredShots = 0;
+        } else if (profile.totalPriority >= 42D || profile.zonePriority >= 15D || profile.baseThreat >= 28D) {
+            profile.baselineShots = 1;
+            profile.additionalShots = 0;
+            profile.deferredShots = 0;
+        } else {
+            profile.baselineShots = 0;
+            profile.additionalShots = 0;
+            profile.deferredShots = 1;
+        }
+        return profile;
+    }
+
     private double threatScore(EnemyNode enemy, EnemyType enemyType) {
         return defaultDouble(enemyType == null ? null : enemyType.getValue()) * 0.45D
                 + defaultDouble(enemyType == null ? null : enemyType.getDamageCapability()) * 0.35D
                 + defaultDouble(enemyType == null ? null : enemyType.getMaxAttackRange()) / 10000D * 0.1D
                 + defaultDouble(enemy.getSpeed()) * 0.02D;
+    }
+
+    private ZonePriorityProfile resolveZonePriority(EnemyNode enemy,
+                                                    EnemyType enemyType,
+                                                    List<ProtectionZone> zones) {
+        ZonePriorityProfile best = new ZonePriorityProfile();
+        for (ProtectionZone zone : zones) {
+            if (zone == null || zone.getId() == null) {
+                continue;
+            }
+            double distanceKm = computeDistanceKm(zone, enemy);
+            double zoneRadiusKm = Math.max(defaultDouble(zone.getSize()) / 1000D, 1D);
+            double edgeDistanceKm = Math.max(distanceKm - zoneRadiusKm, 0D);
+            double attackRangeKm = Math.max(defaultDouble(enemyType == null ? null : enemyType.getMaxAttackRange()) / 1000D, 1D);
+            double zoneValueFactor = clamp(defaultDouble(zone.getValue()) / 3D, 0D, 1D);
+            double attackWindowFactor = clamp(1D - edgeDistanceKm / attackRangeKm, 0D, 1D);
+            double proximityFactor = clamp(1D - edgeDistanceKm / 220D, 0D, 1D);
+            double headingFactor = computeHeadingFactor(enemy, zone);
+            double score = zoneValueFactor * 22D + attackWindowFactor * 18D + proximityFactor * 10D + headingFactor * 6D;
+            if (score > best.score) {
+                best.zoneId = zone.getId();
+                best.score = score;
+            }
+        }
+        return best;
+    }
+
+    private double computeHeadingFactor(EnemyNode enemy, ProtectionZone zone) {
+        if (enemy == null || zone == null || enemy.getHeading() == null || enemy.getLongitude() == null || enemy.getLatitude() == null
+                || zone.getLocation() == null || zone.getLocation().size() < 2) {
+            return 0D;
+        }
+        double bearing = computeBearing(enemy.getLongitude(), enemy.getLatitude(), zone.getLocation().get(0), zone.getLocation().get(1));
+        double diff = Math.abs(enemy.getHeading() - bearing) % 360D;
+        double normalizedDiff = diff > 180D ? 360D - diff : diff;
+        return clamp(1D - normalizedDiff / 180D, 0D, 1D);
+    }
+
+    private double computeBearing(double lon1, double lat1, double lon2, double lat2) {
+        double startLat = Math.toRadians(lat1);
+        double endLat = Math.toRadians(lat2);
+        double deltaLon = Math.toRadians(lon2 - lon1);
+        double y = Math.sin(deltaLon) * Math.cos(endLat);
+        double x = Math.cos(startLat) * Math.sin(endLat)
+                - Math.sin(startLat) * Math.cos(endLat) * Math.cos(deltaLon);
+        return (Math.toDegrees(Math.atan2(y, x)) + 360D) % 360D;
     }
 
     private String resolveAlgorithmName(String algorithmType) {
@@ -483,11 +617,28 @@ public class StaticFormationPlanningService {
 
     private static class ScoredAssignment {
         private WeaponResource resource;
+        private EnemyPriorityProfile priorityProfile;
         private String ammoKey;
         private double distanceKm;
         private double distanceFactor;
         private double firepowerFactor;
         private double defenseFactor;
         private double totalScore;
+    }
+
+    private static class EnemyPriorityProfile {
+        private EnemyNode enemy;
+        private String priorityZoneId;
+        private double baseThreat;
+        private double zonePriority;
+        private double totalPriority;
+        private int baselineShots;
+        private int additionalShots;
+        private int deferredShots;
+    }
+
+    private static class ZonePriorityProfile {
+        private String zoneId;
+        private double score;
     }
 }

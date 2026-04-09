@@ -348,7 +348,7 @@ onMounted(() => {
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="detail in plan.details" :key="`${plan.planId}-${detail.weaponNodeId}-${detail.targetEnemyId}-${detail.fireType}`">
+                  <tr v-for="(detail, index) in plan.details" :key="`${plan.planId}-${detail.weaponNodeId}-${detail.targetEnemyId}-${detail.fireType}-${index}`">
                     <td>{{ detail.weaponType }} / {{ detail.fireType }}</td>
                     <td>{{ detail.targetEnemyType }} ({{ detail.targetEnemyId }})</td>
                     <td>{{ detail.sourceZoneId }}</td>
