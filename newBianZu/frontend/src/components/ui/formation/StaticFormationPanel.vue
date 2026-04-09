@@ -136,6 +136,7 @@ function toggleWeaponType(type: string) {
 }
 
 onMounted(() => {
+  resStore.loadAllDictionaries()
   generate()
 })
 </script>

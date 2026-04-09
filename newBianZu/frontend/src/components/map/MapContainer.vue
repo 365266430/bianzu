@@ -61,7 +61,7 @@ onMounted(() => {
   if (L && mapContainer.value) {
     map.value = createMap(mapContainer.value, {
       zoomControl: false,
-      zoom: 4,
+      zoom: 5,
     })
     provide('map', map.value)
     mapLoaded.value = true

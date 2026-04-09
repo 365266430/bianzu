@@ -8,8 +8,13 @@ import vueDevTools from 'vite-plugin-vue-devtools'
 export default defineConfig({
   plugins: [
     vue(),
-    vueDevTools(),
+    ...(process.env.VITE_ENABLE_DEVTOOLS === 'true' ? [vueDevTools()] : []),
   ],
+  server: {
+    watch: {
+      ignored: ['**/public/tiles/**'],
+    },
+  },
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url))
