@@ -8,6 +8,10 @@ import java.util.List;
  */
 @Data
 public class SimulationContext {
+    
     private List<EnemyNode> enemies;
+    private List<WeaponNode> weapons;
     private List<ProtectionZone> zones;
+    private FormationParadigm paradigm;
+    private int step;
 }
