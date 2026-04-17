@@ -89,7 +89,7 @@ public class DynamicFormationPlanningService {
         return result;
     }
 
-    
+
     /**
      * 过滤可用武器（状态为待命 且 弹药充足）
      */
@@ -114,7 +114,7 @@ public class DynamicFormationPlanningService {
     }
 
     /**
-     * 弹药充足性检查：checkAmmoSufficiency / isAmmoSufficient
+     * 弹药充足性检查
      */
     private Map<String, Boolean> checkAmmoSufficiency(
             List<WeaponNode> weapons, DynamicFormationRequestDTO.FormationConstraints constraints) {
@@ -134,7 +134,7 @@ public class DynamicFormationPlanningService {
     }
 
     /**
-     * 弹药充足性检查：checkAmmoSufficiency / isAmmoSufficient
+     * 弹药充足性检查
      */
     private boolean isAmmoSufficient(WeaponNode weapon, double threshold) {
         if (weapon.getAmmoStates() == null || weapon.getAmmoStates().isEmpty()) {
@@ -154,7 +154,7 @@ public class DynamicFormationPlanningService {
     }
 
     /**
-     * 火力匹配验证：matchWeaponEnemy / isInRange / isInAltitude
+     * 火力匹配验证
      */
     private Map<String, List<EnemyNode>> matchWeaponEnemy(List<WeaponNode> weapons,
                                                           List<EnemyNode> enemies,
@@ -172,7 +172,7 @@ public class DynamicFormationPlanningService {
     }
 
     /**
-     * 火力匹配验证：matchWeaponEnemy / isInRange / isInAltitude
+     * 火力匹配验证
      */
     private boolean isInRange(WeaponNode weapon,
                               EnemyNode enemy,
@@ -206,7 +206,7 @@ public class DynamicFormationPlanningService {
     }
 
     /**
-     * 火力匹配验证：matchWeaponEnemy / isInRange / isInAltitude
+     * 火力匹配验证
      */
     private boolean isInAltitude(WeaponNode weapon, EnemyNode enemy, Map<String, FireType> fireTypeMap) {
         if (weapon == null || enemy == null || enemy.getAltitude() == null
@@ -236,7 +236,7 @@ public class DynamicFormationPlanningService {
     }
 
     /**
-     * 调度成本计算：calculateDispatchCosts
+     * 调度成本计算
      */
     private Map<String, Double> calculateDispatchCosts(
             Map<String, List<EnemyNode>> candidates,
@@ -265,7 +265,7 @@ public class DynamicFormationPlanningService {
     }
 
     /**
-     * 敌我位置关系分析：analyzeInZoneStatus / isEnemyInZone
+     * 敌我位置关系分析
      */
     private Map<String, Boolean> analyzeInZoneStatus(List<EnemyNode> enemies, List<ProtectionZone> zones) {
         List<ProtectionZone> safeZones = safeList(zones);
@@ -278,7 +278,7 @@ public class DynamicFormationPlanningService {
     }
 
     /**
-     * 敌我位置关系分析：analyzeInZoneStatus / isEnemyInZone
+     * 敌我位置关系分析
      */
     private boolean isEnemyInZone(EnemyNode enemy, ProtectionZone zone) {
         Double distanceKm = computeDistanceKm(zone, enemy);
