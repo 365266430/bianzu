@@ -69,8 +69,8 @@ export const createZone = (
   // 创建圆点标记并合并默认配置与用户配置
   const marker = L.circleMarker(latlng, {
     radius: 4,
-    color: '#ff0000',
-    fillColor: '#ff0000',
+    color: '#3388ff',
+    fillColor: '#3388ff',
     fillOpacity: 1,
     weight: 1,
     ...markerOptions.dotOptions
@@ -123,8 +123,8 @@ export const createEnemy = (
   // 创建蓝色圆形节点，合并自定义dotOptions
   const marker = L.circleMarker(latlng, {
     radius: 8,
-    color: '#0000ff',
-    fillColor: '#0000ff',
+    color: '#d71920',
+    fillColor: '#d71920',
     fillOpacity: 0.8,
     weight: 2,
     ...dotOptions
