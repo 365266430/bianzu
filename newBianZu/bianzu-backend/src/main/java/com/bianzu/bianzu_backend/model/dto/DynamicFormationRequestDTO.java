@@ -1,9 +1,11 @@
 package com.bianzu.bianzu_backend.model.dto;
 
 import com.bianzu.bianzu_backend.model.EnemyNode;
+import com.bianzu.bianzu_backend.model.EnemyType;
+import com.bianzu.bianzu_backend.model.FireType;
 import com.bianzu.bianzu_backend.model.ProtectionZone;
-import com.bianzu.bianzu_backend.model.WeaponNode;
 import com.bianzu.bianzu_backend.model.FormationParadigm;
+import com.bianzu.bianzu_backend.model.WeaponType;
 import lombok.Data;
 import java.util.List;
 
@@ -14,12 +16,14 @@ import java.util.List;
 @Data
 public class DynamicFormationRequestDTO {
 
-    private List<String> selectedWeaponIds;
+    private List<String> selectedWeaponTypes;
     private List<String> selectedEnemyIds;
     private FormationParadigm paradigm;
     private List<ProtectionZone> zones;
-    private List<WeaponNode> weaponNodes;
     private List<EnemyNode> enemyNodes;
+    private List<WeaponType> weaponTypes;
+    private List<FireType> fireTypes;
+    private List<EnemyType> enemyTypes;
 
     //匹配约束配置--后续可更改弹药阈值、或重新设计
     private FormationConstraints constraints = new FormationConstraints();
@@ -54,4 +58,13 @@ public class DynamicFormationRequestDTO {
         private Integer maxGroupSize = 6;
     }
     private DynamicAlgorithmConfigDTO config;
+
+    // Backward-compatible alias for legacy code still using selectedWeaponIds.
+    public List<String> getSelectedWeaponIds() {
+        return selectedWeaponTypes;
+    }
+
+    public void setSelectedWeaponIds(List<String> selectedWeaponIds) {
+        this.selectedWeaponTypes = selectedWeaponIds;
+    }
 }

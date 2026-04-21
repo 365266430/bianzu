@@ -2,6 +2,7 @@
 import type { EnemyNode } from '@/model/enemy'
 import type { ProtectionZone } from '@/model/protectionZone'
 import type { ApiResponse } from '@/model/response'
+import type { SimulationSnapshot } from '@/model/simulation'
 
 export const simApi = {
   async toggleSimulation(action: 'start' | 'stop') {
@@ -72,6 +73,24 @@ export const simApi = {
       return await request.delete<any, ApiResponse<string>>('/sim/clear-all')
     } catch (error) {
       console.error('Failed to clear map objects:', error)
+      throw error
+    }
+  },
+
+  async getSimulationSnapshot() {
+    try {
+      return await request.get<any, ApiResponse<SimulationSnapshot>>('/sim/snapshot')
+    } catch (error) {
+      console.error('Failed to load simulation snapshot:', error)
+      throw error
+    }
+  },
+
+  async initWeaponNodes() {
+    try {
+      return await request.post<any, string>('/weapon/init-nodes')
+    } catch (error) {
+      console.error('Failed to init weapon nodes:', error)
       throw error
     }
   },

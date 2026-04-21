@@ -1,30 +1,54 @@
 <template>
   <div class="map-toolbar">
     <div class="logo-area">
-      <!-- 可替换为你的logo图片 -->
       <span class="logo-text">作战编组</span>
     </div>
-    <div class="toolbar-btn-group" @mouseenter="showSub1 = true" @mouseleave="showSub1 = false">
-      <button class="toolbar-btn" @click="$emit('node-info-click')">节点信息</button>
-      <div v-if="showSub1" class="sub-btn-list">
-        <button class="sub-btn" @click="$emit('resource-type-info')"><span class="sub-btn-inner">资源类型数据库</span></button>
+
+    <div class="toolbar-btn-group" @mouseenter="showDataMenu = true" @mouseleave="showDataMenu = false">
+      <button class="toolbar-btn">资源数据</button>
+      <div v-if="showDataMenu" class="sub-btn-list">
+        <button class="sub-btn" @click="emit('resource-type-info')">
+          <span class="sub-btn-inner">资源类型数据库</span>
+        </button>
       </div>
     </div>
-    <div class="toolbar-btn-group" @mouseenter="showSub2 = true" @mouseleave="showSub2 = false">
+
+    <div class="toolbar-btn-group" @mouseenter="showStaticMenu = true" @mouseleave="showStaticMenu = false">
       <button class="toolbar-btn">静态编组</button>
-      <div v-if="showSub2" class="sub-btn-list">
-        <button class="sub-btn" @click="$emit('pso-fire-allot')"><span class="sub-btn-inner">静态火力分配</span></button>
-        <button class="sub-btn" @click="$emit('static-group-generate')"><span class="sub-btn-inner">静态编组生成</span></button>
+      <div v-if="showStaticMenu" class="sub-btn-list">
+        <button class="sub-btn" @click="emit('pso-fire-allot')">
+          <span class="sub-btn-inner">静态火力分配</span>
+        </button>
+        <button class="sub-btn" @click="emit('static-group-generate')">
+          <span class="sub-btn-inner">静态编组生成</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="toolbar-btn-group" @mouseenter="showDynamicMenu = true" @mouseleave="showDynamicMenu = false">
+      <button class="toolbar-btn">动态编组</button>
+      <div v-if="showDynamicMenu" class="sub-btn-list">
+        <button class="sub-btn" @click="emit('dynamic-group-generate')">
+          <span class="sub-btn-inner">动态编组生成</span>
+        </button>
       </div>
     </div>
   </div>
 </template>
 
-
-<script setup>
+<script setup lang="ts">
 import { ref } from 'vue'
-const showSub1 = ref(false)
-const showSub2 = ref(false)
+
+const emit = defineEmits<{
+  (event: 'resource-type-info'): void
+  (event: 'pso-fire-allot'): void
+  (event: 'static-group-generate'): void
+  (event: 'dynamic-group-generate'): void
+}>()
+
+const showDataMenu = ref(false)
+const showStaticMenu = ref(false)
+const showDynamicMenu = ref(false)
 </script>
 
 <style scoped>
@@ -34,7 +58,7 @@ const showSub2 = ref(false)
   padding: 12px 24px;
   background: rgba(44, 62, 80, 0.9);
   border-radius: 0;
-  box-shadow: 0 2px 12px rgba(0,0,0,0.12);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.12);
   position: fixed;
   top: 0;
   left: 0;
@@ -50,6 +74,7 @@ const showSub2 = ref(false)
   min-width: 60px;
   height: 36px;
 }
+
 .logo-text {
   font-size: 1.25rem;
   font-weight: bold;
@@ -72,17 +97,18 @@ const showSub2 = ref(false)
   font-weight: 600;
   font-size: 1rem;
   letter-spacing: 1px;
-  box-shadow: 0 2px 8px rgba(52,152,219,0.15);
+  box-shadow: 0 2px 8px rgba(52, 152, 219, 0.15);
   cursor: pointer;
   transition: background 0.2s, transform 0.2s;
   outline: none;
   margin-left: 0;
-  min-width: 180px; /* 与子按钮宽度一致 */
+  min-width: 180px;
   text-align: center;
   display: flex;
   justify-content: center;
   align-items: center;
 }
+
 .toolbar-btn:hover {
   background: linear-gradient(90deg, #14365c 0%, #1e4e7a 100%);
   transform: translateY(-2px) scale(1.05);
@@ -95,7 +121,7 @@ const showSub2 = ref(false)
   display: flex;
   flex-direction: column;
   background: rgba(44, 62, 80, 0.98);
-  box-shadow: 0 2px 8px rgba(52,152,219,0.15);
+  box-shadow: 0 2px 8px rgba(52, 152, 219, 0.15);
   padding: 4px 0;
   min-width: 180px;
 }
@@ -115,9 +141,11 @@ const showSub2 = ref(false)
   align-items: center;
   min-width: 180px;
 }
+
 .sub-btn:hover {
   background: #14365c;
 }
+
 .sub-btn-inner {
   width: 100%;
   text-align: center;

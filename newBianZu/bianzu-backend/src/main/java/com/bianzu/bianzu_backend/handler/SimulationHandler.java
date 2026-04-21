@@ -4,8 +4,10 @@ import com.alibaba.fastjson2.JSON;
 import com.bianzu.bianzu_backend.common.WebSocketMessage;
 import com.bianzu.bianzu_backend.model.EnemyNode;
 import com.bianzu.bianzu_backend.model.ProtectionZone;
+import com.bianzu.bianzu_backend.model.WeaponNode;
 import com.bianzu.bianzu_backend.service.EnemyNodeService;
 import com.bianzu.bianzu_backend.service.ProtectionZoneService;
+import com.bianzu.bianzu_backend.service.WeaponNodeService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;
@@ -27,6 +29,9 @@ public class SimulationHandler extends TextWebSocketHandler {
     private EnemyNodeService enemyService;
     @Autowired
     private ProtectionZoneService zoneService;
+
+    @Autowired
+    private WeaponNodeService weaponNodeService;
 
     @Override
     public void afterConnectionEstablished(WebSocketSession session) {
@@ -56,6 +61,7 @@ public class SimulationHandler extends TextWebSocketHandler {
         try {
             List<EnemyNode> enemies = enemyService.getAllEnemies();
             List<ProtectionZone> zones = zoneService.getAllZones();
+            List<WeaponNode> weapons = weaponNodeService.getAllWeapons();
             if (enemies!=null&&!enemies.isEmpty()) {
                 WebSocketMessage<List<EnemyNode>> msg = WebSocketMessage.of("ENEMY_UPDATE", enemies);
                 session.sendMessage(new TextMessage(JSON.toJSONString(msg)));
@@ -63,6 +69,11 @@ public class SimulationHandler extends TextWebSocketHandler {
 
             if (zones!=null&&!zones.isEmpty()) {
                 WebSocketMessage<List<ProtectionZone>> msg = WebSocketMessage.of("ZONE_UPDATE", zones);
+                session.sendMessage(new TextMessage(JSON.toJSONString(msg)));
+            }
+
+            if (weapons != null && !weapons.isEmpty()) {
+                WebSocketMessage<List<WeaponNode>> msg = WebSocketMessage.of("WEAPON_UPDATE", weapons);
                 session.sendMessage(new TextMessage(JSON.toJSONString(msg)));
             }
         } catch (IOException e) {

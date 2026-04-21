@@ -1,6 +1,11 @@
 import request from '@/utils/request'
 import type { ApiResponse } from '@/model/response'
-import type { StaticFormationConfig, StaticFormationResult } from '@/model/formation'
+import type {
+  DynamicFormationRequest,
+  DynamicFormationResult,
+  StaticFormationConfig,
+  StaticFormationResult,
+} from '@/model/formation'
 
 export const formationApi = {
   async generateStaticFormation(config: StaticFormationConfig) {
@@ -8,5 +13,16 @@ export const formationApi = {
       '/formation/static/generate',
       config,
     )
+  },
+
+  async generateDynamicFormation(payload: DynamicFormationRequest) {
+    return await request.post<DynamicFormationRequest, ApiResponse<DynamicFormationResult>>(
+      '/formation/dynamic/generate',
+      payload,
+    )
+  },
+
+  async getParadigms() {
+    return await request.get<any, ApiResponse<string[]>>('/formation/paradigms')
   },
 }

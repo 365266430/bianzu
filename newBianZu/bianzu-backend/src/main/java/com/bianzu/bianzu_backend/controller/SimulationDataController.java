@@ -6,8 +6,12 @@ import com.bianzu.bianzu_backend.common.WebSocketMessage;
 import com.bianzu.bianzu_backend.handler.SimulationHandler;
 import com.bianzu.bianzu_backend.model.EnemyNode;
 import com.bianzu.bianzu_backend.model.ProtectionZone;
+import com.bianzu.bianzu_backend.model.WeaponNode;
+import com.bianzu.bianzu_backend.model.dto.SimulationSnapshotDTO;
 import com.bianzu.bianzu_backend.service.EnemyNodeService;
 import com.bianzu.bianzu_backend.service.ProtectionZoneService;
+import com.bianzu.bianzu_backend.service.WeaponNodeService;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -17,6 +21,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.ArrayList;
 import java.util.List;
 /**
  * @Author dongjun
@@ -35,6 +40,23 @@ public class SimulationDataController {
 
     @Autowired
     private ProtectionZoneService protectionZoneService;
+
+    @Autowired
+    private WeaponNodeService weaponNodeService;
+
+    @GetMapping("/snapshot")
+    public Result<SimulationSnapshotDTO> getSimulationSnapshot() {
+        List<EnemyNode> enemies = enemyNodeService.getAllEnemies();
+        List<ProtectionZone> zones = protectionZoneService.getAllZones();
+        List<WeaponNode> weapons = weaponNodeService.getAllWeapons();
+
+        SimulationSnapshotDTO snapshot = new SimulationSnapshotDTO(
+                weapons == null ? new ArrayList<>() : weapons,
+                enemies == null ? new ArrayList<>() : enemies,
+                zones == null ? new ArrayList<>() : zones
+        );
+        return Result.success(snapshot, "Simulation snapshot loaded");
+    }
 
     /**
      * 添加敌方节点到仿真系统中

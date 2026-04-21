@@ -3,6 +3,7 @@
     @resource-type-info="showResourceModal = true"
     @pso-fire-allot="openFormationModal('allocation')"
     @static-group-generate="openFormationModal('plans')"
+    @dynamic-group-generate="showDynamicFormationModal = true"
   />
 
   <div ref="mapContainer" class="w-full h-screen"></div>
@@ -30,6 +31,17 @@
     <StaticFormationPanel :default-tab="formationTab" />
   </ModalWindow>
 
+  <ModalWindow
+    :show="showDynamicFormationModal"
+    title="生成动态编组方案"
+    width="1400px"
+    height="86vh"
+    max-height="86vh"
+    @close="showDynamicFormationModal = false"
+  >
+    <DynamicFormationPanel />
+  </ModalWindow>
+
   <ControlPanel />
 </template>
 
@@ -42,6 +54,7 @@ import MapToolbar from './MapToolbar.vue'
 import ControlPanel from './sub-units/ControlPanel.vue'
 import ResourceDashboard from '../ui/resourse/ResourceDashboard.vue'
 import StaticFormationPanel from '../ui/formation/StaticFormationPanel.vue'
+import DynamicFormationPanel from '../ui/formation/DynamicFormationPanel.vue'
 import ModalWindow from '../ui/common/ModalWindow.vue'
 
 const mapContainer = ref(null)
@@ -50,6 +63,7 @@ const map = shallowRef(null)
 const mapLoaded = ref(false)
 const showResourceModal = ref(false)
 const showFormationModal = ref(false)
+const showDynamicFormationModal = ref(false)
 const formationTab = ref('allocation')
 
 function openFormationModal(tab) {

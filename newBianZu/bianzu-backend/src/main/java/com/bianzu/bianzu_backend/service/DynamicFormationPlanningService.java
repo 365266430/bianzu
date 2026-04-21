@@ -1,17 +1,21 @@
 package com.bianzu.bianzu_backend.service;
 
-import com.bianzu.bianzu_backend.model.*;
-import com.bianzu.bianzu_backend.model.dto.*;
-import org.springframework.beans.factory.annotation.Autowired;
+import com.bianzu.bianzu_backend.model.EnemyNode;
+import com.bianzu.bianzu_backend.model.EnemyType;
+import com.bianzu.bianzu_backend.model.FireType;
+import com.bianzu.bianzu_backend.model.FormationParadigm;
+import com.bianzu.bianzu_backend.model.ProtectionZone;
+import com.bianzu.bianzu_backend.model.WeaponNode;
+import com.bianzu.bianzu_backend.model.WeaponType;
+import com.bianzu.bianzu_backend.model.dto.DynamicFormationRequestDTO;
+import com.bianzu.bianzu_backend.model.dto.DynamicFormationResultDTO;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+
 import java.util.*;
 import java.util.stream.Collectors;
 
-/**
- * 动态编组规划服务
- * 职责：根据实时态势，动态进行武器-目标分配
- */
 @Slf4j
 @Service
 public class DynamicFormationPlanningService {
@@ -29,30 +33,38 @@ public class DynamicFormationPlanningService {
      */
     public DynamicFormationResultDTO generateDynamicFormation(DynamicFormationRequestDTO request) {
         List<ProtectionZone> safeZones = safeList(request.getZones());
-        List<WeaponNode> safeWeaponNodes = safeList(request.getWeaponNodes());
         List<EnemyNode> safeEnemyNodes = safeList(request.getEnemyNodes());
+        List<WeaponType> safeWeaponTypes = safeList(request.getWeaponTypes());
+        List<FireType> safeFireTypes = safeList(request.getFireTypes());
         DynamicFormationRequestDTO.FormationConstraints constraints = request.getConstraints() == null
                 ? new DynamicFormationRequestDTO.FormationConstraints()
                 : request.getConstraints();
-        Map<String, FireType> fireTypeMap = fireTypeService.getFireTypes().stream()
+
+        if (safeWeaponTypes.isEmpty()) {
+            safeWeaponTypes = safeList(weaponTypeService.getWeaponTypes());
+        }
+        if (safeFireTypes.isEmpty()) {
+            safeFireTypes = safeList(fireTypeService.getFireTypes());
+        }
+
+        Map<String, FireType> fireTypeMap = safeFireTypes.stream()
                 .filter(Objects::nonNull)
                 .filter(item -> item.getType() != null)
                 .collect(Collectors.toMap(FireType::getType, item -> item, (left, right) -> left, LinkedHashMap::new));
-        Map<String, WeaponType> weaponTypeMap = weaponTypeService.getWeaponTypes().stream()
+        Map<String, WeaponType> weaponTypeMap = safeWeaponTypes.stream()
                 .filter(Objects::nonNull)
                 .filter(item -> item.getType() != null)
                 .collect(Collectors.toMap(WeaponType::getType, item -> item, (left, right) -> left, LinkedHashMap::new));
-        Map<String, ProtectionZone> zoneByWeaponId = buildZoneByWeaponId(safeZones);
 
-        log.info("开始动态编组 | 武器数: {} | 敌方目标数: {} | 范式: {}",
-                request.getSelectedWeaponIds().size(),
-                request.getSelectedEnemyIds().size(),
-                request.getParadigm().getChineseName());
+        Map<String, ProtectionZone> zoneByWeaponId = new LinkedHashMap<>();
+        List<WeaponNode> virtualWeapons = buildVirtualWeapons(request, safeZones, weaponTypeMap, zoneByWeaponId);
 
-        // 1. 过滤可用武器（待命+弹药充足）
-        List<WeaponNode> availableWeapons = filterAvailableWeapons(request, safeWeaponNodes);
+        log.info("Dynamic formation planning start | selectedWeaponTypes={} | selectedEnemyIds={} | paradigm={}",
+                request.getSelectedWeaponTypes() == null ? 0 : request.getSelectedWeaponTypes().size(),
+                request.getSelectedEnemyIds() == null ? 0 : request.getSelectedEnemyIds().size(),
+                request.getParadigm());
 
-        // 2. 过滤有效目标
+        List<WeaponNode> availableWeapons = filterAvailableWeapons(virtualWeapons);
         List<EnemyNode> validEnemies = filterValidEnemies(request, safeEnemyNodes);
 
         if (availableWeapons.isEmpty() || validEnemies.isEmpty()) {
@@ -72,8 +84,7 @@ public class DynamicFormationPlanningService {
         // 6. 敌我位置关系分析
         Map<String, Boolean> inZoneStatus = analyzeInZoneStatus(validEnemies, safeZones);
 
-        // 7. 生成方案
-        DynamicFormationResultDTO result = buildResult(
+        return buildResult(
                 availableWeapons,
                 validEnemies,
                 candidates,
@@ -85,19 +96,74 @@ public class DynamicFormationPlanningService {
                 fireTypeMap,
                 weaponTypeMap,
                 zoneByWeaponId);
+    }
 
+    private List<WeaponNode> buildVirtualWeapons(
+            DynamicFormationRequestDTO request,
+            List<ProtectionZone> zones,
+            Map<String, WeaponType> weaponTypeMap,
+            Map<String, ProtectionZone> zoneByWeaponId) {
+        List<String> selectedTypes = safeList(request.getSelectedWeaponTypes()).stream()
+                .filter(Objects::nonNull)
+                .map(String::trim)
+                .filter(value -> !value.isEmpty())
+                .distinct()
+                .toList();
+
+        if (selectedTypes.isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        List<ProtectionZone> safeZones = safeList(zones);
+        List<WeaponNode> result = new ArrayList<>();
+        int sequence = 1;
+        for (String weaponTypeName : selectedTypes) {
+            WeaponType weaponType = weaponTypeMap.get(weaponTypeName);
+            if (weaponType == null) {
+                continue;
+            }
+
+            if (safeZones.isEmpty()) {
+                WeaponNode node = buildVirtualWeaponNode(weaponType, "GLOBAL", sequence++);
+                result.add(node);
+            } else {
+                for (ProtectionZone zone : safeZones) {
+                    String zoneId = zone == null ? "UNKNOWN_ZONE" : String.valueOf(zone.getId());
+                    WeaponNode node = buildVirtualWeaponNode(weaponType, zoneId, sequence++);
+                    result.add(node);
+                    zoneByWeaponId.put(node.getId(), zone);
+                }
+            }
+        }
         return result;
     }
 
+    private WeaponNode buildVirtualWeaponNode(WeaponType weaponType, String zoneId, int sequence) {
+        WeaponNode node = new WeaponNode();
+        String typeName = weaponType.getType() == null ? "UNKNOWN" : weaponType.getType();
+        node.setId("V-" + sanitizeIdSegment(typeName) + "-" + sanitizeIdSegment(zoneId) + "-" + sequence);
+        node.setType(typeName);
+        node.setStatus(0);
 
-    /**
-     * 过滤可用武器（状态为待命 且 弹药充足）
-     */
-    private List<WeaponNode> filterAvailableWeapons(DynamicFormationRequestDTO request, List<WeaponNode> weaponNodes) {
+        List<WeaponNode.NodeAmmoState> ammoStates = new ArrayList<>();
+        for (WeaponType.FireTypeAllocation allocation : safeList(weaponType.getFireTypes())) {
+            if (allocation == null || allocation.getFireType() == null) {
+                continue;
+            }
+            WeaponNode.NodeAmmoState ammoState = new WeaponNode.NodeAmmoState();
+            ammoState.setFireUnitType(allocation.getFireType());
+            int quantity = allocation.getQuantity() == null ? 0 : Math.max(allocation.getQuantity(), 0);
+            ammoState.setCurrentCount(quantity);
+            ammoStates.add(ammoState);
+        }
+        node.setAmmoStates(ammoStates);
+        return node;
+    }
+
+    private List<WeaponNode> filterAvailableWeapons(List<WeaponNode> weaponNodes) {
         return weaponNodes.stream()
                 .filter(Objects::nonNull)
-                .filter(w -> request.getSelectedWeaponIds().contains(w.getId()))
-                .filter(w -> w.getStatus() == 0) // 0=待命
+                .filter(w -> w.getStatus() == null || w.getStatus() == 0)
                 .filter(this::hasAmmo)
                 .toList();
     }
@@ -106,10 +172,17 @@ public class DynamicFormationPlanningService {
      * 过滤有效目标
      */
     private List<EnemyNode> filterValidEnemies(DynamicFormationRequestDTO request, List<EnemyNode> enemyNodes) {
+        Set<String> selectedEnemyIds = new LinkedHashSet<>(safeList(request.getSelectedEnemyIds()));
+        Set<String> knownEnemyTypes = safeList(request.getEnemyTypes()).stream()
+                .filter(Objects::nonNull)
+                .map(EnemyType::getType)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
         return enemyNodes.stream()
                 .filter(Objects::nonNull)
-                .filter(e -> request.getSelectedEnemyIds().contains(e.getId()))
-                .filter(e -> e.getAltitude() != null) // 未被击毁
+                .filter(e -> selectedEnemyIds.isEmpty() || selectedEnemyIds.contains(e.getId()))
+                .filter(e -> knownEnemyTypes.isEmpty() || knownEnemyTypes.contains(e.getType()))
+                .filter(e -> e.getAltitude() != null)
                 .toList();
     }
 
@@ -631,16 +704,6 @@ public class DynamicFormationPlanningService {
         return null;
     }
 
-    private Map<String, ProtectionZone> buildZoneByWeaponId(List<ProtectionZone> zones) {
-        Map<String, ProtectionZone> zoneByWeaponId = new HashMap<>();
-        for (ProtectionZone zone : zones) {
-            for (String weaponId : safeList(zone.getStationedWeaponIds())) {
-                zoneByWeaponId.put(weaponId, zone);
-            }
-        }
-        return zoneByWeaponId;
-    }
-
     private Double computeDistanceKm(ProtectionZone zone, EnemyNode enemy) {
         if (zone == null || enemy == null || zone.getLocation() == null || zone.getLocation().size() < 2
                 || enemy.getLatitude() == null || enemy.getLongitude() == null) {
@@ -656,6 +719,17 @@ public class DynamicFormationPlanningService {
                 + Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2))
                 * Math.sin(dLon / 2D) * Math.sin(dLon / 2D);
         return EARTH_RADIUS_KM * 2D * Math.atan2(Math.sqrt(a), Math.sqrt(1D - a));
+    }
+
+    private String sanitizeIdSegment(String value) {
+        if (value == null) {
+            return "NA";
+        }
+        String sanitized = value.replaceAll("[^a-zA-Z0-9_-]", "_");
+        if (sanitized.isBlank()) {
+            return "NA";
+        }
+        return sanitized;
     }
 
     private <T> List<T> safeList(List<T> source) {
