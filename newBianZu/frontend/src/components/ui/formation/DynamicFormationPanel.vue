@@ -95,6 +95,19 @@ const planBars = computed(() => {
 
 const bestPlanId = computed(() => result.value?.recommendedPlanId ?? '')
 
+const algorithmTypeDisplayMap: Record<string, string> = {
+  DQN: '深度Q网络（DQN）',
+}
+
+const algorithmTypeDisplay = computed({
+  get: () => algorithmTypeDisplayMap[form.config.algorithmType] ?? form.config.algorithmType,
+  set: (value: string) => {
+    const normalized = value.trim()
+    const matched = Object.entries(algorithmTypeDisplayMap).find(([, label]) => label === normalized)
+    form.config.algorithmType = matched?.[0] ?? normalized
+  },
+})
+
 function createDefaultConstraints(): DynamicFormationConstraints {
   return {
     requireAmmoSufficiency: false,
@@ -414,30 +427,30 @@ onUnmounted(() => {
 
         <div class="field-grid">
           <label class="field">
-            <span>algorithmType</span>
-            <input v-model="form.config.algorithmType" />
+            <span>算法类型</span>
+            <input v-model="algorithmTypeDisplay" />
           </label>
           <label class="field">
-            <span>planCount</span>
+            <span>方案数量</span>
             <input v-model.number="form.config.planCount" type="number" min="1" step="1" />
           </label>
           <label class="field">
-            <span>epochs</span>
+            <span>训练轮次</span>
             <input v-model.number="form.config.epochs" type="number" min="1" step="1" />
           </label>
         </div>
 
         <div class="field-grid">
           <label class="field">
-            <span>distanceWeight</span>
+            <span>距离权重</span>
             <input v-model.number="form.config.distanceWeight" type="number" min="0" max="1" step="0.01" />
           </label>
           <label class="field">
-            <span>firepowerWeight</span>
+            <span>火力权重</span>
             <input v-model.number="form.config.firepowerWeight" type="number" min="0" max="1" step="0.01" />
           </label>
           <label class="field">
-            <span>defenseWeight</span>
+            <span>防御权重</span>
             <input v-model.number="form.config.defenseWeight" type="number" min="0" max="1" step="0.01" />
           </label>
         </div>
