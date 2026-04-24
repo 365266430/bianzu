@@ -433,16 +433,36 @@ onMounted(() => {
 .field input,
 .field select {
   width: 100%;
-  padding: 10px 12px;
+  min-height: 42px;
+  padding: 8px 12px;
   border: 1px solid #c7d4e2;
-  border-radius: 12px;
+  border-radius: 10px;
   background: #f8fbff;
+  font-size: 0.92rem;
+  line-height: 1.2;
+  box-sizing: border-box;
 }
 
 .field-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
+}
+
+.field-grid .field {
+  gap: 6px;
+  margin-top: 14px;
+}
+
+.field-grid .field span {
+  font-size: 0.86rem;
+}
+
+.field-grid .field input,
+.field-grid .field select {
+  min-height: 40px;
+  padding: 6px 10px;
+  border-radius: 9px;
 }
 
 .tag-btn {
