@@ -1,8 +1,9 @@
 package com.bianzu.bianzu_backend.service;
 
-import com.alibaba.fastjson2.JSONArray;
+import com.alibaba.fastjson2.JSON;
 import com.bianzu.bianzu_backend.model.ProtectionZone;
 import com.bianzu.bianzu_backend.model.WeaponType;
+import com.bianzu.bianzu_backend.repository.ProtectionZoneRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
@@ -14,13 +15,16 @@ import java.util.UUID;
 @Service
 public class ProtectionZoneService {
 
+    private static final String KEY_BLUE_ZONES = "sim:state:blue_zones";
+
     @Autowired
     private RedisTemplate<String, Object> redisTemplate;
 
     @Autowired
-    private WeaponTypeService weaponService;
+    private ProtectionZoneRepository protectionZoneRepository;
 
-    private static final String KEY_BLUE_ZONES = "sim:state:blue_zones";
+    @Autowired
+    private WeaponTypeService weaponService;
 
     public void initProtectionZones() {
         WeaponType hq9Launcher = weaponService.getWeaponByType("HQ-9_Launcher");
@@ -50,50 +54,34 @@ public class ProtectionZoneService {
         zoneSh.setStationedWeaponIds(new ArrayList<>());
         zones.add(zoneSh);
 
-        redisTemplate.opsForValue().set(KEY_BLUE_ZONES, zones);
+        saveAllZones(zones);
         System.out.println(">>> Protection zones initialized: " + zones.size());
     }
 
     public List<ProtectionZone> getAllZones() {
         Object obj = redisTemplate.opsForValue().get(KEY_BLUE_ZONES);
-        if (obj == null) {
-            return new ArrayList<>();
+        if (obj != null) {
+            return JSON.parseArray(JSON.toJSONString(obj), ProtectionZone.class);
         }
-        return ((JSONArray) obj).toJavaList(ProtectionZone.class);
+
+        List<ProtectionZone> zones = protectionZoneRepository.findAll();
+        redisTemplate.opsForValue().set(KEY_BLUE_ZONES, zones);
+        return zones;
     }
 
     public void saveAllZones(List<ProtectionZone> zones) {
         if (zones == null) {
             return;
         }
+        protectionZoneRepository.deleteAll();
+        protectionZoneRepository.saveAll(zones);
         redisTemplate.opsForValue().set(KEY_BLUE_ZONES, zones);
     }
 
     public List<ProtectionZone> appendZone(ProtectionZone zone) {
-        if (zone == null) {
-            throw new IllegalArgumentException("Protection zone cannot be null");
-        }
-        if (zone.getLocation() == null || zone.getLocation().size() < 2) {
-            throw new IllegalArgumentException("Protection zone location cannot be empty");
-        }
-        if (zone.getSize() == null || zone.getSize() <= 0) {
-            zone.setSize(25000D);
-        }
-        if (zone.getValue() == null) {
-            zone.setValue(2);
-        }
-        if (zone.getHealth() == null) {
-            zone.setHealth(10);
-        }
-        if (zone.getStationedWeaponIds() == null) {
-            zone.setStationedWeaponIds(new ArrayList<>());
-        }
-        if (zone.getId() == null || zone.getId().isBlank()) {
-            zone.setId("Zone-" + UUID.randomUUID().toString().substring(0, 8));
-        }
+        normalizeZone(zone);
 
-        List<ProtectionZone> zones = getAllZones();
-        zones = zones == null ? new ArrayList<>() : new ArrayList<>(zones);
+        List<ProtectionZone> zones = new ArrayList<>(getAllZones());
         zones.add(zone);
         saveAllZones(zones);
         return zones;
@@ -104,8 +92,7 @@ public class ProtectionZoneService {
             throw new IllegalArgumentException("Protection zone id cannot be empty");
         }
 
-        List<ProtectionZone> zones = getAllZones();
-        zones = zones == null ? new ArrayList<>() : new ArrayList<>(zones);
+        List<ProtectionZone> zones = new ArrayList<>(getAllZones());
         boolean removed = zones.removeIf(zone -> zoneId.equals(zone.getId()));
         if (!removed) {
             throw new IllegalArgumentException("Protection zone not found: " + zoneId);
@@ -119,25 +106,9 @@ public class ProtectionZoneService {
         if (zoneId == null || zoneId.isBlank()) {
             throw new IllegalArgumentException("Protection zone id cannot be empty");
         }
-        if (updatedZone == null) {
-            throw new IllegalArgumentException("Updated protection zone cannot be null");
-        }
-        if (updatedZone.getLocation() == null || updatedZone.getLocation().size() < 2) {
-            throw new IllegalArgumentException("Protection zone location cannot be empty");
-        }
-        if (updatedZone.getSize() == null || updatedZone.getSize() <= 0) {
-            updatedZone.setSize(25000D);
-        }
-        if (updatedZone.getValue() == null) {
-            updatedZone.setValue(2);
-        }
-        if (updatedZone.getHealth() == null) {
-            updatedZone.setHealth(10);
-        }
+        normalizeZone(updatedZone);
 
-        List<ProtectionZone> zones = getAllZones();
-        zones = zones == null ? new ArrayList<>() : new ArrayList<>(zones);
-
+        List<ProtectionZone> zones = new ArrayList<>(getAllZones());
         boolean updated = false;
         for (int i = 0; i < zones.size(); i++) {
             ProtectionZone existing = zones.get(i);
@@ -195,5 +166,29 @@ public class ProtectionZoneService {
 
         saveAllZones(allZones);
         return true;
+    }
+
+    private void normalizeZone(ProtectionZone zone) {
+        if (zone == null) {
+            throw new IllegalArgumentException("Protection zone cannot be null");
+        }
+        if (zone.getLocation() == null || zone.getLocation().size() < 2) {
+            throw new IllegalArgumentException("Protection zone location cannot be empty");
+        }
+        if (zone.getSize() == null || zone.getSize() <= 0) {
+            zone.setSize(25000D);
+        }
+        if (zone.getValue() == null) {
+            zone.setValue(2);
+        }
+        if (zone.getHealth() == null) {
+            zone.setHealth(10);
+        }
+        if (zone.getStationedWeaponIds() == null) {
+            zone.setStationedWeaponIds(new ArrayList<>());
+        }
+        if (zone.getId() == null || zone.getId().isBlank()) {
+            zone.setId("Zone-" + UUID.randomUUID().toString().substring(0, 8));
+        }
     }
 }

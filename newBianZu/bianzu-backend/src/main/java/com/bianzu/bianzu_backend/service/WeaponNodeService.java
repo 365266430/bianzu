@@ -3,13 +3,14 @@ package com.bianzu.bianzu_backend.service;
 import com.alibaba.fastjson2.JSON;
 import com.bianzu.bianzu_backend.model.WeaponNode;
 import com.bianzu.bianzu_backend.model.WeaponType;
+import com.bianzu.bianzu_backend.repository.WeaponNodeRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 
-import java.util.*;
-import java.util.stream.Collectors;
-
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
 
 @Service
 public class WeaponNodeService {
@@ -20,86 +21,66 @@ public class WeaponNodeService {
     private RedisTemplate<String, Object> redisTemplate;
 
     @Autowired
-    private WeaponTypeService weaponTypeService; // 依赖模板服务
+    private WeaponNodeRepository weaponNodeRepository;
 
     @Autowired
-    private FireTypeService fireTypeService;
+    private WeaponTypeService weaponTypeService;
 
-    /**
-     * 获取所有武器节点 (用于仿真引擎计算)
-     */
     public List<WeaponNode> getAllWeapons() {
         Object obj = redisTemplate.opsForValue().get(KEY_BLUE_WEAPONS);
-        if (obj == null) return new ArrayList<>();
+        if (obj != null) {
+            return JSON.parseArray(JSON.toJSONString(obj), WeaponNode.class);
+        }
 
-        // 处理 JSONArray 转 List
-        String json = JSON.toJSONString(obj);
-        return JSON.parseArray(json, WeaponNode.class);
+        List<WeaponNode> nodes = weaponNodeRepository.findAll();
+        redisTemplate.opsForValue().set(KEY_BLUE_WEAPONS, nodes);
+        return nodes;
     }
 
-    /**
-     * 批量保存/更新节点 (用于仿真引擎回写)
-     */
     public void saveAllWeapons(List<WeaponNode> nodes) {
-        // 直接存 List，变成 JSON 字符串
+        if (nodes == null) {
+            return;
+        }
+        weaponNodeRepository.deleteAll();
+        weaponNodeRepository.saveAll(nodes);
         redisTemplate.opsForValue().set(KEY_BLUE_WEAPONS, nodes);
     }
 
+    public void initWeapons() {
+        if (weaponTypeService.getWeaponByType("HQ-9_Launcher") == null) {
+            throw new RuntimeException("请先初始化 WeaponUnit 模板库！");
+        }
 
-    /**
-    * 初始武器装备节点
-    */
+        List<WeaponNode> allNodes = new ArrayList<>();
+        for (int i = 1; i <= 2; i++) {
+            allNodes.add(createWeaponInstance("HQ-9_Launcher"));
+        }
+        saveAllWeapons(allNodes);
+    }
 
-     public void initWeapons(){
-         if(weaponTypeService.getWeaponByType("HQ-9_Launcher")==null)
-             throw new RuntimeException("请先初始化 WeaponUnit 模板库！");
-         List<WeaponNode> allNodes = new ArrayList<>();
-         for(int i=1;i<=2;i++){
-             WeaponNode node = createWeaponInstance("HQ-9_Launcher");
-             allNodes.add(node);
-         }
-         saveAllWeapons(allNodes);
-     }
-
-
-    /**
-     * 【工厂方法】创建一个新的武器节点实例
-     * 根据 type 从模板库复制弹药数据
-     * @param type 武器类型 (e.g. "HQ-9_Launcher")
-     * @return 初始化好的 WeaponNode
-     */
     public WeaponNode createWeaponInstance(String type) {
-        // 1. 查模板
         WeaponType template = weaponTypeService.getWeaponByType(type);
         if (template == null) {
             throw new RuntimeException("未知武器类型: " + type);
         }
 
-        // 2. 创建实例
         WeaponNode node = new WeaponNode();
-        node.setId(UUID.randomUUID().toString()); // 生成唯一ID
+        node.setId(UUID.randomUUID().toString());
         node.setType(type);
-        node.setStatus(0); // 默认待命 (Idle)
+        node.setStatus(0);
 
-        // 3. 初始化弹药状态 (深拷贝)
         List<WeaponNode.NodeAmmoState> ammoStates = new ArrayList<>();
-
         if (template.getFireTypes() != null) {
             for (WeaponType.FireTypeAllocation allocation : template.getFireTypes()) {
-                String fireTypeName = allocation.getFireType();
-                Integer maxCount = allocation.getQuantity();
-                // 填入当前状态
-                ammoStates.add(new WeaponNode.NodeAmmoState(fireTypeName, maxCount));
+                ammoStates.add(new WeaponNode.NodeAmmoState(allocation.getFireType(), allocation.getQuantity()));
             }
         }
         node.setAmmoStates(ammoStates);
         return node;
     }
 
-    /**
-     * 清空所有节点 (重置战场用)
-     */
     public void clearAllWeapons() {
+        weaponNodeRepository.deleteAll();
         redisTemplate.delete(KEY_BLUE_WEAPONS);
     }
 }

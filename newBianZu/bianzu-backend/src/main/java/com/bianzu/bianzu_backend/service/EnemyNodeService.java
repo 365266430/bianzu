@@ -1,7 +1,8 @@
 package com.bianzu.bianzu_backend.service;
 
-import com.alibaba.fastjson2.JSONArray;
+import com.alibaba.fastjson2.JSON;
 import com.bianzu.bianzu_backend.model.EnemyNode;
+import com.bianzu.bianzu_backend.repository.EnemyNodeRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
@@ -12,53 +13,37 @@ import java.util.UUID;
 
 @Service
 public class EnemyNodeService {
-    @Autowired
-    private RedisTemplate redisTemplate;
 
     private static final String STATE_RED_ENEMIES = "sim:state:red_enemies";
 
+    @Autowired
+    private RedisTemplate<String, Object> redisTemplate;
+
+    @Autowired
+    private EnemyNodeRepository enemyNodeRepository;
+
     public List<EnemyNode> getAllEnemies() {
-        try {
-            Object obj = redisTemplate.opsForValue().get(STATE_RED_ENEMIES);
-            if (obj == null) {
-                return null;
-            }
-            return ((JSONArray) obj).toJavaList(EnemyNode.class);
-        } catch (Exception e) {
-            System.out.println("Failed to read enemy nodes: " + e.getMessage());
-            return null;
+        Object obj = redisTemplate.opsForValue().get(STATE_RED_ENEMIES);
+        if (obj != null) {
+            return JSON.parseArray(JSON.toJSONString(obj), EnemyNode.class);
         }
+
+        List<EnemyNode> enemies = enemyNodeRepository.findAll();
+        redisTemplate.opsForValue().set(STATE_RED_ENEMIES, enemies);
+        return enemies;
     }
 
     public void saveAllEnemies(List<EnemyNode> enemies) {
         if (enemies == null) {
             return;
         }
+        enemyNodeRepository.deleteAll();
+        enemyNodeRepository.saveAll(enemies);
         redisTemplate.opsForValue().set(STATE_RED_ENEMIES, enemies);
     }
 
     public List<EnemyNode> appendEnemy(EnemyNode enemy) {
-        if (enemy == null) {
-            throw new IllegalArgumentException("Enemy target cannot be null");
-        }
-        if (enemy.getType() == null || enemy.getType().isBlank()) {
-            throw new IllegalArgumentException("Enemy target type cannot be empty");
-        }
-        if (enemy.getLatitude() == null || enemy.getLongitude() == null) {
-            throw new IllegalArgumentException("Enemy target location cannot be empty");
-        }
-        if (enemy.getAltitude() == null) {
-            enemy.setAltitude(10000D);
-        }
-        if (enemy.getHeading() == null) {
-            enemy.setHeading(90D);
-        }
-        if (enemy.getSpeed() == null) {
-            enemy.setSpeed(0D);
-        }
-        if (enemy.getId() == null || enemy.getId().isBlank()) {
-            enemy.setId("E-" + UUID.randomUUID().toString().substring(0, 8));
-        }
+        normalizeEnemy(enemy);
 
         List<EnemyNode> enemies = getAllEnemies();
         enemies = enemies == null ? new ArrayList<>() : new ArrayList<>(enemies);
@@ -72,8 +57,7 @@ public class EnemyNodeService {
             throw new IllegalArgumentException("Enemy id cannot be empty");
         }
 
-        List<EnemyNode> enemies = getAllEnemies();
-        enemies = enemies == null ? new ArrayList<>() : new ArrayList<>(enemies);
+        List<EnemyNode> enemies = new ArrayList<>(getAllEnemies());
         boolean removed = enemies.removeIf(enemy -> enemyId.equals(enemy.getId()));
         if (!removed) {
             throw new IllegalArgumentException("Enemy not found: " + enemyId);
@@ -87,19 +71,9 @@ public class EnemyNodeService {
         if (enemyId == null || enemyId.isBlank()) {
             throw new IllegalArgumentException("Enemy id cannot be empty");
         }
-        if (updatedEnemy == null) {
-            throw new IllegalArgumentException("Updated enemy target cannot be null");
-        }
-        if (updatedEnemy.getType() == null || updatedEnemy.getType().isBlank()) {
-            throw new IllegalArgumentException("Enemy target type cannot be empty");
-        }
-        if (updatedEnemy.getLatitude() == null || updatedEnemy.getLongitude() == null) {
-            throw new IllegalArgumentException("Enemy target location cannot be empty");
-        }
+        normalizeEnemy(updatedEnemy);
 
-        List<EnemyNode> enemies = getAllEnemies();
-        enemies = enemies == null ? new ArrayList<>() : new ArrayList<>(enemies);
-
+        List<EnemyNode> enemies = new ArrayList<>(getAllEnemies());
         boolean updated = false;
         for (int i = 0; i < enemies.size(); i++) {
             EnemyNode existing = enemies.get(i);
@@ -137,5 +111,29 @@ public class EnemyNodeService {
         List<EnemyNode> enemies = new ArrayList<>();
         saveAllEnemies(enemies);
         return enemies;
+    }
+
+    private void normalizeEnemy(EnemyNode enemy) {
+        if (enemy == null) {
+            throw new IllegalArgumentException("Enemy target cannot be null");
+        }
+        if (enemy.getType() == null || enemy.getType().isBlank()) {
+            throw new IllegalArgumentException("Enemy target type cannot be empty");
+        }
+        if (enemy.getLatitude() == null || enemy.getLongitude() == null) {
+            throw new IllegalArgumentException("Enemy target location cannot be empty");
+        }
+        if (enemy.getAltitude() == null) {
+            enemy.setAltitude(10000D);
+        }
+        if (enemy.getHeading() == null) {
+            enemy.setHeading(90D);
+        }
+        if (enemy.getSpeed() == null) {
+            enemy.setSpeed(0D);
+        }
+        if (enemy.getId() == null || enemy.getId().isBlank()) {
+            enemy.setId("E-" + UUID.randomUUID().toString().substring(0, 8));
+        }
     }
 }

@@ -1,7 +1,14 @@
 package com.bianzu.bianzu_backend.model;
 
 
-import com.alibaba.fastjson2.annotation.JSONField;
+import com.bianzu.bianzu_backend.config.DoubleListConverter;
+import com.bianzu.bianzu_backend.config.StringListConverter;
+import jakarta.persistence.Column;
+import jakarta.persistence.Convert;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Id;
+import jakarta.persistence.Lob;
+import jakarta.persistence.Table;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -17,6 +24,8 @@ import java.util.List;
 @Data
 @AllArgsConstructor
 @NoArgsConstructor
+@Entity
+@Table(name = "protection_zones")
 public class ProtectionZone implements Serializable {
 
     private static final long serialVersionUID = 1L;
@@ -25,6 +34,8 @@ public class ProtectionZone implements Serializable {
      * 保护区编号或名称
      * 前端: ID (string | number)
      */
+    @Id
+    @Column(length = 100)
     private String id;
 
     /**
@@ -32,6 +43,8 @@ public class ProtectionZone implements Serializable {
      * 前端: Location: [number, number]
      * Java中使用 List<Double> (或 Double[]) 存储，例如 [120.5, 30.0]
      */
+    @Lob
+    @Convert(converter = DoubleListConverter.class)
     private List<Double> location;
 
     /**
@@ -55,5 +68,7 @@ public class ProtectionZone implements Serializable {
     /*
     * 保护区关联的武器装备ID
     * */
+    @Lob
+    @Convert(converter = StringListConverter.class)
     private List<String> stationedWeaponIds;
 }

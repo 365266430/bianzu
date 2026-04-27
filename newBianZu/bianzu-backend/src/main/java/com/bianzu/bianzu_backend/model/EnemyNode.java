@@ -1,6 +1,10 @@
 package com.bianzu.bianzu_backend.model;
 
 
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -14,6 +18,8 @@ import java.io.Serializable;
 @Data
 @AllArgsConstructor
 @NoArgsConstructor
+@Entity
+@Table(name = "enemy_nodes")
 public class EnemyNode implements Serializable {
 
     private static final long serialVersionUID = 1L;
@@ -22,6 +28,8 @@ public class EnemyNode implements Serializable {
      * 唯一标识符
      * 例如: "E-001"
      */
+    @Id
+    @Column(length = 100)
     private String id;
 
     /**

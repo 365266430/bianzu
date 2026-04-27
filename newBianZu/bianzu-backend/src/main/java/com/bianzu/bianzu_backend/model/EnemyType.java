@@ -5,6 +5,10 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
 import java.io.Serializable;
 
 /**
@@ -14,6 +18,8 @@ import java.io.Serializable;
 @Data
 @NoArgsConstructor
 @AllArgsConstructor // 生成全参构造器 (不包含业务逻辑，仅赋值)
+@Entity
+@Table(name = "enemy_types")
 public class EnemyType implements Serializable {
 
     private static final long serialVersionUID = 1L;
@@ -22,6 +28,8 @@ public class EnemyType implements Serializable {
      * 类型名称 (主键)
      * e.g., "F-35", "Tomahawk", "H-6K"
      */
+    @Id
+    @Column(length = 100)
     private String type;
 
     /**
@@ -78,5 +86,6 @@ public class EnemyType implements Serializable {
 
 
 
+    @Column(length = 1000)
     private String description;
 }

@@ -1,6 +1,13 @@
 package com.bianzu.bianzu_backend.model;
 
 
+import com.bianzu.bianzu_backend.config.FireTypeAllocationListConverter;
+import jakarta.persistence.Column;
+import jakarta.persistence.Convert;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Id;
+import jakarta.persistence.Lob;
+import jakarta.persistence.Table;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -16,6 +23,8 @@ import java.util.List;
 @Data
 @AllArgsConstructor
 @NoArgsConstructor
+@Entity
+@Table(name = "weapon_types")
 public class WeaponType implements Serializable {
 
     private static final long serialVersionUID = 1L;
@@ -24,6 +33,8 @@ public class WeaponType implements Serializable {
      * 类型名称或编号
      * 前端: Type (string | number)
      */
+    @Id
+    @Column(length = 100)
     private String type;
 
     /**
@@ -37,12 +48,15 @@ public class WeaponType implements Serializable {
      * 装备作用（载弹、雷达等）
      * 前端: Function ('载弹' | '雷达' | string)
      */
+    @Column(name = "weapon_function")
     private String function;
 
     /**
      * 火力资源类型及数量
      * 前端: FireTypes (Array<{ fireType: FireUnit; quantity: number; }>)
      */
+    @Lob
+    @Convert(converter = FireTypeAllocationListConverter.class)
     private List<FireTypeAllocation> fireTypes = new ArrayList<>();
 
     /**
@@ -51,6 +65,7 @@ public class WeaponType implements Serializable {
      */
     private Integer channelCount;
 
+    @Column(length = 1000)
     private String description;
 
     /**

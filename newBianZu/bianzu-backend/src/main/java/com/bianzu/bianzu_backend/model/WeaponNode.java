@@ -1,5 +1,12 @@
 package com.bianzu.bianzu_backend.model;
 
+import com.bianzu.bianzu_backend.config.NodeAmmoStateListConverter;
+import jakarta.persistence.Column;
+import jakarta.persistence.Convert;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Id;
+import jakarta.persistence.Lob;
+import jakarta.persistence.Table;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -16,6 +23,8 @@ import java.util.List;
 @Data
 @AllArgsConstructor
 @NoArgsConstructor
+@Entity
+@Table(name = "weapon_nodes")
 public class WeaponNode implements Serializable {
 
     private static final long serialVersionUID = 1L;
@@ -24,6 +33,8 @@ public class WeaponNode implements Serializable {
      * 唯一标识符
      * 例如: "HQ9-BJ-01" (北京防区1号车)
      */
+    @Id
+    @Column(length = 100)
     private String id;
 
     /**
@@ -46,6 +57,8 @@ public class WeaponNode implements Serializable {
      * 剩余弹药状态
      * 这是一个列表，因为有些武器可能挂载了多种弹药 (如: [ {导弹: 3}, {机炮: 500} ])
      */
+    @Lob
+    @Convert(converter = NodeAmmoStateListConverter.class)
     private List<NodeAmmoState> ammoStates = new ArrayList<>();
 
 

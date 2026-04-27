@@ -20,6 +20,7 @@ import java.util.stream.Collectors;
 @Service
 public class DynamicFormationPlanningService {
 
+    /** 地球半径，单位：公里。用于保护区与目标之间的距离估算。 */
     private static final double EARTH_RADIUS_KM = 6371D;
 
     @Autowired
@@ -31,6 +32,10 @@ public class DynamicFormationPlanningService {
     /**
      * 生成动态编组方案
      */
+    // 动态编组主入口。
+    // 当前负责组织整条动态编组链路：参数兜底、字典加载、虚拟武器构造、
+    // 约束检查、候选匹配、调度成本计算、在区状态分析以及启发式方案生成。
+    // 注意：当前仍是启发式方案，不是 DQN 强化学习推理。
     public DynamicFormationResultDTO generateDynamicFormation(DynamicFormationRequestDTO request) {
         List<ProtectionZone> safeZones = safeList(request.getZones());
         List<EnemyNode> safeEnemyNodes = safeList(request.getEnemyNodes());
@@ -76,12 +81,15 @@ public class DynamicFormationPlanningService {
         Map<String, Boolean> ammoSufficiency = checkAmmoSufficiency(availableWeapons, constraints);
 
         // 4. 火力匹配验证
+        // 基于射程和射高筛选“武器-目标”候选关系。
         Map<String, List<EnemyNode>> candidates = matchWeaponEnemy(availableWeapons, validEnemies, fireTypeMap, zoneByWeaponId);
 
         // 5. 调度成本计算
+        // 计算候选关系对应的调度成本。
         Map<String, Double> dispatchCosts = calculateDispatchCosts(candidates, availableWeapons, fireTypeMap, zoneByWeaponId);
 
         // 6. 敌我位置关系分析
+        // 分析目标是否进入保护区，用于后续优先级和得分计算。
         Map<String, Boolean> inZoneStatus = analyzeInZoneStatus(validEnemies, safeZones);
 
         return buildResult(
@@ -98,6 +106,8 @@ public class DynamicFormationPlanningService {
                 zoneByWeaponId);
     }
 
+    // 按“已选武器类型 × 当前保护区”展开虚拟武器节点，
+    // 便于在不依赖真实部署实体的前提下完成动态分配推演。
     private List<WeaponNode> buildVirtualWeapons(
             DynamicFormationRequestDTO request,
             List<ProtectionZone> zones,
@@ -138,6 +148,7 @@ public class DynamicFormationPlanningService {
         return result;
     }
 
+    // 虚拟武器节点只承载本轮动态编组所需的最小信息：编号、类型、状态和弹药。
     private WeaponNode buildVirtualWeaponNode(WeaponType weaponType, String zoneId, int sequence) {
         WeaponNode node = new WeaponNode();
         String typeName = weaponType.getType() == null ? "UNKNOWN" : weaponType.getType();
@@ -160,6 +171,8 @@ public class DynamicFormationPlanningService {
         return node;
     }
 
+    // 过滤当前轮可参与分配的武器：
+    // 1. 节点存在；2. 状态可用；3. 至少还有一种可用弹药。
     private List<WeaponNode> filterAvailableWeapons(List<WeaponNode> weaponNodes) {
         return weaponNodes.stream()
                 .filter(Objects::nonNull)
@@ -171,6 +184,8 @@ public class DynamicFormationPlanningService {
     /**
      * 过滤有效目标
      */
+    // 过滤有效敌方目标。
+    // 仅保留被请求选中、类型可识别且具备高度信息的目标。
     private List<EnemyNode> filterValidEnemies(DynamicFormationRequestDTO request, List<EnemyNode> enemyNodes) {
         Set<String> selectedEnemyIds = new LinkedHashSet<>(safeList(request.getSelectedEnemyIds()));
         Set<String> knownEnemyTypes = safeList(request.getEnemyTypes()).stream()
@@ -189,6 +204,8 @@ public class DynamicFormationPlanningService {
     /**
      * 弹药充足性检查
      */
+    // 检查各武器节点的弹药充足性。
+    // 如果当前约束要求“必须弹药充足”，则不足的节点会被标记为 false。
     private Map<String, Boolean> checkAmmoSufficiency(
             List<WeaponNode> weapons, DynamicFormationRequestDTO.FormationConstraints constraints) {
         Map<String, Boolean> result = new HashMap<>();
@@ -209,6 +226,8 @@ public class DynamicFormationPlanningService {
     /**
      * 弹药充足性检查
      */
+    // 判断单个武器节点的弹药是否充足。
+    // 当前采用简化规则：总弹药量大于 0，且已装填弹种占比达到阈值。
     private boolean isAmmoSufficient(WeaponNode weapon, double threshold) {
         if (weapon.getAmmoStates() == null || weapon.getAmmoStates().isEmpty()) {
             return false;
@@ -229,6 +248,8 @@ public class DynamicFormationPlanningService {
     /**
      * 火力匹配验证
      */
+    // 为每个武器节点筛选可打击的敌方目标集合。
+    // 当前匹配维度主要包括射程约束和射高约束。
     private Map<String, List<EnemyNode>> matchWeaponEnemy(List<WeaponNode> weapons,
                                                           List<EnemyNode> enemies,
                                                           Map<String, FireType> fireTypeMap,
@@ -247,6 +268,7 @@ public class DynamicFormationPlanningService {
     /**
      * 火力匹配验证
      */
+    // 判断目标是否处于武器任一可用弹种的有效射程内。
     private boolean isInRange(WeaponNode weapon,
                               EnemyNode enemy,
                               Map<String, FireType> fireTypeMap,
@@ -281,6 +303,7 @@ public class DynamicFormationPlanningService {
     /**
      * 火力匹配验证
      */
+    // 判断目标高度是否处于武器任一可用弹种的有效射高范围内。
     private boolean isInAltitude(WeaponNode weapon, EnemyNode enemy, Map<String, FireType> fireTypeMap) {
         if (weapon == null || enemy == null || enemy.getAltitude() == null
                 || weapon.getAmmoStates() == null || weapon.getAmmoStates().isEmpty()) {
@@ -311,6 +334,8 @@ public class DynamicFormationPlanningService {
     /**
      * 调度成本计算
      */
+    // 计算调度成本。
+    // 当前简化为“目标距离 × 单位攻击成本”的累加值。
     private Map<String, Double> calculateDispatchCosts(
             Map<String, List<EnemyNode>> candidates,
             List<WeaponNode> availableWeapons,
@@ -340,6 +365,8 @@ public class DynamicFormationPlanningService {
     /**
      * 敌我位置关系分析
      */
+    // 分析敌方目标是否位于任意保护区内。
+    // 该信息可用于动态编组中的优先级控制与得分加成。
     private Map<String, Boolean> analyzeInZoneStatus(List<EnemyNode> enemies, List<ProtectionZone> zones) {
         List<ProtectionZone> safeZones = safeList(zones);
         Map<String, Boolean> inZoneStatus = new HashMap<>();
@@ -353,6 +380,7 @@ public class DynamicFormationPlanningService {
     /**
      * 敌我位置关系分析
      */
+    // 判断单个敌方目标是否位于指定保护区半径范围内。
     private boolean isEnemyInZone(EnemyNode enemy, ProtectionZone zone) {
         Double distanceKm = computeDistanceKm(zone, enemy);
         if (distanceKm == null) {
@@ -365,6 +393,7 @@ public class DynamicFormationPlanningService {
     /**
      * 检查武器弹药是否充足
      */
+    // 判断武器节点当前是否至少还拥有一种可用弹药。
     private boolean hasAmmo(WeaponNode weapon) {
         if (weapon.getAmmoStates() == null || weapon.getAmmoStates().isEmpty()) {
             return false;
@@ -376,6 +405,8 @@ public class DynamicFormationPlanningService {
     /**
      * 构建结果
      */
+    // 组装动态编组结果。
+    // plan 的生成目前来自启发式分配逻辑，后续可平滑替换为 DQN 结果。
     private DynamicFormationResultDTO buildResult(
             List<WeaponNode> availableWeapons,
             List<EnemyNode> validEnemies,
@@ -426,6 +457,8 @@ public class DynamicFormationPlanningService {
     /**
      * 构建空结果
      */
+    // 构造空结果。
+    // 当当前轮无可用武器或无有效目标时返回。
     private DynamicFormationResultDTO buildEmptyResult(
             DynamicFormationRequestDTO request,
             List<WeaponNode> availableWeapons,
@@ -445,6 +478,9 @@ public class DynamicFormationPlanningService {
         return result;
     }
 
+    // 生成启发式动态编组方案。
+    // 当前不是强化学习推理，而是根据拦截率、距离、在区状态、弹药余量、
+    // 调度成本等因素综合打分，再按分数从高到低执行一轮贪心选择。
     private List<DynamicFormationResultDTO.DynamicFormationPlanDTO> generateHeuristicPlans(
             List<WeaponNode> availableWeapons,
             Map<String, List<EnemyNode>> candidates,
@@ -463,6 +499,7 @@ public class DynamicFormationPlanningService {
         double minInterceptionRate = clamp(defaultDouble(constraints.getMinInterceptionRate()), 0D, 1D);
         Set<String> allowedDomains = resolveAllowedDomains(request.getParadigm());
 
+        // 先展开所有可行候选，并为后续排序生成统一得分。
         List<ScoredCandidate> scoredCandidates = new ArrayList<>();
         for (WeaponNode weapon : availableWeapons) {
             WeaponType weaponType = weaponTypeMap.get(weapon.getType());
@@ -490,6 +527,7 @@ public class DynamicFormationPlanningService {
                 double dispatchPenalty = Boolean.TRUE.equals(constraints.getConsiderDispatchCost())
                         ? clamp(dispatchCost / 180D, 0D, 0.25D) * clamp(defaultDouble(constraints.getDispatchCostWeight()), 0D, 1D)
                         : 0D;
+                // 当前是工程化启发式评分模型，后续可替换为学习到的价值函数或 Q 值。
                 double score = clamp(interception * 0.56D + normalizedDistance * 0.32D + zoneBonus + ammoFactor - dispatchPenalty, 0D, 1D);
                 scoredCandidates.add(new ScoredCandidate(weapon, enemy, bestFireType, deployDomain, zoneByWeaponId.get(weapon.getId()), distanceKm, dispatchCost, targetInZone, score));
             }
@@ -499,6 +537,7 @@ public class DynamicFormationPlanningService {
             return new ArrayList<>();
         }
 
+        // 贪心选择阶段：同一武器只分配一次，同一目标也只接收一次主分配。
         Set<String> selectedWeapons = new HashSet<>();
         Set<String> selectedEnemies = new HashSet<>();
         Map<String, Integer> remainingAmmo = buildRemainingAmmoMap(availableWeapons);
@@ -580,6 +619,7 @@ public class DynamicFormationPlanningService {
         return remainingAmmo;
     }
 
+    // 从当前武器可用弹种中，选择满足最小拦截率且打击条件最优的弹种。
     private FireType resolveBestFireType(WeaponNode weapon,
                                          EnemyNode enemy,
                                          Map<String, FireType> fireTypeMap,
@@ -657,6 +697,7 @@ public class DynamicFormationPlanningService {
                 .orElse(0D);
     }
 
+    // 根据编组范式解析允许参与的部署域，例如 AIR_GROUND -> {AIR, GROUND}。
     private Set<String> resolveAllowedDomains(FormationParadigm paradigm) {
         if (paradigm == null || paradigm == FormationParadigm.ALL) {
             return Set.of();
@@ -672,6 +713,7 @@ public class DynamicFormationPlanningService {
         return domains;
     }
 
+    // 对部署域做归一化，兼容中英文写法，便于和范式枚举进行统一比较。
     private String normalizeDomain(String rawDomain) {
         if (rawDomain == null) {
             return "UNKNOWN";
@@ -704,6 +746,7 @@ public class DynamicFormationPlanningService {
         return null;
     }
 
+    // 使用 Haversine 公式按经纬度估算保护区中心点到目标的球面距离。
     private Double computeDistanceKm(ProtectionZone zone, EnemyNode enemy) {
         if (zone == null || enemy == null || zone.getLocation() == null || zone.getLocation().size() < 2
                 || enemy.getLatitude() == null || enemy.getLongitude() == null) {
