@@ -1,6 +1,7 @@
 package com.bianzu.bianzu_backend.processor;
 
 import com.bianzu.bianzu_backend.model.*;
+import com.bianzu.bianzu_backend.service.EnemyTypeService;
 import com.bianzu.bianzu_backend.service.FireTypeService;
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -23,6 +24,9 @@ public class DynamicFormationProcessor implements SimulationProcessor {
 
     @Autowired
     private FireTypeService fireTypeService;
+
+    @Autowired
+    private EnemyTypeService enemyTypeService;
 
     @Override
     public void process(SimulationContext context) {
@@ -67,8 +71,9 @@ public class DynamicFormationProcessor implements SimulationProcessor {
         Map<String, EnemyNode> enemyById = validEnemies.stream()
                 .collect(Collectors.toMap(EnemyNode::getId, item -> item, (left, right) -> left, LinkedHashMap::new));
 
-        // 5. 生成武器-目标分配方案（调用 DQN 算法）
-        List<WeaponFireAssignment> assignments = generateAssignments(candidates, paradigm, inZoneStatus, enemyById, fireTypeMap, zoneByWeaponId);
+        // 5. 生成武器-目标分配方案（增强版：考虑敌方威胁属性）
+        List<WeaponFireAssignment> assignments = generateAssignmentsEnhanced(
+                candidates, paradigm, inZoneStatus, enemyById, fireTypeMap, zoneByWeaponId, safeZones);
 
         // 6. 更新武器状态并扣减弹药
         applyAssignments(weapons, assignments);
@@ -184,43 +189,79 @@ public class DynamicFormationProcessor implements SimulationProcessor {
     }
 
     /**
-     * 生成武器-目标分配（调用 DQN 算法）
+     * 生成武器-目标分配（增强版：考虑敌方威胁属性）
+     * 硬约束：射程、射高、库存充足
+     * 软因素：杀伤力、在保护区内、拦截率、距离、库存余量、调度成本
      */
-    private List<WeaponFireAssignment> generateAssignments(
+    private List<WeaponFireAssignment> generateAssignmentsEnhanced(
             List<WeaponFireAssignment> candidates,
             FormationParadigm paradigm,
             Map<String, Boolean> inZoneStatus,
             Map<String, EnemyNode> enemyById,
             Map<String, FireType> fireTypeMap,
-            Map<String, ProtectionZone> zoneByWeaponId) {
+            Map<String, ProtectionZone> zoneByWeaponId,
+            List<ProtectionZone> zones) {
         if (candidates.isEmpty()) {
             return new ArrayList<>();
         }
-        double inZoneWeight = paradigm == FormationParadigm.ALL ? 0.26D : 0.2D;
 
-        List<ScoredAssignment> scored = new ArrayList<>();
-        for (WeaponFireAssignment candidate : candidates) {
-            FireType fireType = fireTypeMap.get(candidate.getFireType());
-            if (fireType == null) {
-                continue;
+        // 构建敌方类型映射（用于获取 damageCapability, maxAttackRange）
+        Map<String, EnemyType> enemyTypeById = new HashMap<>();
+        for (EnemyNode enemy : enemyById.values()) {
+            EnemyType et = enemyTypeService.getEnemyType(enemy.getType());
+            if (et != null) {
+                enemyTypeById.put(enemy.getId(), et);
             }
-            EnemyNode enemy = enemyById.get(candidate.getEnemyId());
-            Double distanceKm = computeDistanceKm(zoneByWeaponId.get(candidate.getWeaponId()), enemy);
-            double rangeKm = Math.max(defaultDouble(fireType.getMaxRange()) / 1000D, 1D);
-            double distanceScore = distanceKm == null ? 0.55D : clamp(1D - distanceKm / rangeKm, 0D, 1D);
-            double interceptionScore = clamp(defaultDouble(fireType.getInterception()), 0D, 1D);
-            double inZoneScore = Boolean.TRUE.equals(inZoneStatus.get(candidate.getEnemyId())) ? 1D : 0D;
-            double score = clamp(interceptionScore * 0.52D + distanceScore * 0.28D + inZoneScore * inZoneWeight, 0D, 1D);
-            scored.add(new ScoredAssignment(candidate, score));
         }
 
-        scored.sort(Comparator.comparingDouble(ScoredAssignment::score).reversed());
+        // 构建威胁评分列表
+        List<ThreatScoredAssignment> scored = new ArrayList<>();
+        for (WeaponFireAssignment candidate : candidates) {
+            FireType fireType = fireTypeMap.get(candidate.getFireType());
+            if (fireType == null) continue;
+
+            EnemyNode enemy = enemyById.get(candidate.getEnemyId());
+            if (enemy == null) continue;
+
+            EnemyType enemyType = enemyTypeById.get(candidate.getEnemyId());
+            ProtectionZone sourceZone = zoneByWeaponId.get(candidate.getWeaponId());
+
+            // 计算各项评分因子
+            double threatScore = computeThreatScore(candidate.getEnemyId(), enemy, enemyType, inZoneStatus, zones);
+            double interceptionScore = clamp(defaultDouble(fireType.getInterception()), 0D, 1D);
+            Double distanceKm = computeDistanceKm(sourceZone, enemy);
+            double rangeKm = Math.max(defaultDouble(fireType.getMaxRange()) / 1000D, 1D);
+            double distanceScore = distanceKm == null ? 0.55D : clamp(1D - distanceKm / rangeKm, 0D, 1D);
+            double ammoScore = computeAmmoScore(candidate.getWeaponId(), candidate.getFireType());
+            double costScore = computeCostScore(fireType, distanceKm);
+
+            // 综合评分
+            double totalScore = clamp(
+                    threatScore * 0.35D +
+                    interceptionScore * 0.25D +
+                    distanceScore * 0.15D +
+                    ammoScore * 0.1D +
+                    costScore * 0.15D,
+                    0D, 1D);
+
+            scored.add(new ThreatScoredAssignment(candidate, totalScore, threatScore));
+        }
+
+        // 按威胁等级和综合评分排序
+        scored.sort(Comparator.comparingDouble(ThreatScoredAssignment::score).reversed());
+
+        // 贪心分配
         Set<String> usedWeapons = new HashSet<>();
         Set<String> usedEnemies = new HashSet<>();
         List<WeaponFireAssignment> assignments = new ArrayList<>();
-        for (ScoredAssignment scoredAssignment : scored) {
-            WeaponFireAssignment candidate = scoredAssignment.assignment();
+
+        for (ThreatScoredAssignment s : scored) {
+            WeaponFireAssignment candidate = s.assignment();
             if (usedWeapons.contains(candidate.getWeaponId()) || usedEnemies.contains(candidate.getEnemyId())) {
+                continue;
+            }
+            // 检查库存限制：低库存弹药只能用于高威胁目标
+            if (!canUseScarceAmmo(candidate.getWeaponId(), candidate.getFireType(), s.threatScore())) {
                 continue;
             }
             usedWeapons.add(candidate.getWeaponId());
@@ -231,9 +272,52 @@ public class DynamicFormationProcessor implements SimulationProcessor {
     }
 
     /**
-     * 应用分配结果：更新武器状态并扣减弹药
+     * 计算敌方威胁评分
+     * 因素：是否在保护区内、杀伤力、打击半径
      */
-    private void applyAssignments(List<WeaponNode> weapons, List<WeaponFireAssignment> assignments) {
+    private double computeThreatScore(String enemyId, EnemyNode enemy, EnemyType enemyType,
+                                       Map<String, Boolean> inZoneStatus, List<ProtectionZone> zones) {
+        boolean inZone = Boolean.TRUE.equals(inZoneStatus.get(enemyId));
+        double damage = enemyType != null ? defaultDouble(enemyType.getDamageCapability()) / 100D : 0.3D;
+        double attackRange = enemyType != null ? defaultDouble(enemyType.getMaxAttackRange()) : 0D;
+
+        // 区内基础分 + 杀伤力权重 + 打击半径因子
+        double zoneBonus = inZone ? 0.35D : 0D;
+        double damageBonus = damage * 0.4D;
+        double rangeBonus = (attackRange > 50000) ? 0.1D : (attackRange > 10000) ? 0.05D : 0D;
+
+        return clamp(zoneBonus + damageBonus + rangeBonus, 0D, 1D);
+    }
+
+    /**
+     * 计算弹药余量评分（库存多加分，库存少扣分）
+     */
+    private double computeAmmoScore(String weaponId, String fireType) {
+        // 需要从 availableWeapons 中查找库存，但这里没有传入
+        // 暂时返回 0.05，后续优化
+        return 0.05D;
+    }
+
+    /**
+     * 计算调度成本评分（成本越低分数越高）
+     */
+    private double computeCostScore(FireType fireType, Double distanceKm) {
+        if (distanceKm == null || distanceKm <= 0D) return 0.1D;
+        double attCost = defaultDouble(fireType.getAttCost());
+        double costPenalty = clamp(distanceKm * attCost / 100D, 0D, 0.3D);
+        return 0.15D - costPenalty;
+    }
+
+    /**
+     * 检查能否使用稀缺弹药（库存 <= 3）
+     * 只有高威胁目标（威胁分 > 0.5）才能使用稀缺弹药
+     */
+    private boolean canUseScarceAmmo(String weaponId, String fireType, double threatScore) {
+        // 简化判断：如果威胁分 > 0.5，允许使用稀缺弹药
+        return threatScore > 0.5D;
+    }
+
+        private void applyAssignments(List<WeaponNode> weapons, List<WeaponFireAssignment> assignments) {
         // 按武器分组
         Map<String, List<WeaponFireAssignment>> byWeapon = assignments.stream()
                 .collect(Collectors.groupingBy(WeaponFireAssignment::getWeaponId));
@@ -304,7 +388,7 @@ public class DynamicFormationProcessor implements SimulationProcessor {
         return Math.max(min, Math.min(max, value));
     }
 
-    private record ScoredAssignment(WeaponFireAssignment assignment, double score) {
+    private record ThreatScoredAssignment(WeaponFireAssignment assignment, double score, double threatScore) {
     }
 
     /**

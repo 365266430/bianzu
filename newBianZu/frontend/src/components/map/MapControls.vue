@@ -53,7 +53,7 @@ const zoneInitialValue = computed(() => {
   }
 })
 
-const enemyModalTitle = computed(() => enemyModalMode.value === 'edit' ? '编辑红方节点' : '部署敌方目标')
+const enemyModalTitle = computed(() => enemyModalMode.value === 'edit' ? '编辑红方节点' : '部署敌方武器')
 const zoneModalTitle = computed(() => zoneModalMode.value === 'edit' ? '编辑保护区' : '添加保护区')
 const enemySubmitLabel = computed(() => enemyModalMode.value === 'edit' ? '保存' : '生成')
 const zoneSubmitLabel = computed(() => zoneModalMode.value === 'edit' ? '保存' : '生成')
@@ -178,7 +178,7 @@ const handleEnemySubmit = async (formData: any) => {
       throw new Error(res.message || (enemyModalMode.value === 'edit' ? 'Failed to update enemy target' : 'Failed to create enemy target'))
     }
     showEnemyModal.value = false
-    ElMessage.success(enemyModalMode.value === 'edit' ? '红方节点信息已更新' : '敌方目标已生成')
+    ElMessage.success(enemyModalMode.value === 'edit' ? '红方节点信息已更新' : '敌方武器已生成')
   } catch (error: any) {
     console.error('Failed to save enemy target:', error)
     alert(error?.message || 'Failed to save enemy target. Please try again.')

@@ -34,7 +34,7 @@ onUnmounted(() => {
     @click.stop
   >
     <ul v-if="targetKind === 'map'">
-      <li @click="emit('select', 'add-enemy')">+ 添加敌方目标</li>
+      <li @click="emit('select', 'add-enemy')">+ 添加敌方武器</li>
       <li @click="emit('select', 'add-zone')">+ 添加保护区</li>
       <li class="separator"></li>
       <li class="danger" @click="emit('select', 'clear')">清除所有</li>

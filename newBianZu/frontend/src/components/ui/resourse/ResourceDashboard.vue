@@ -82,7 +82,7 @@ const handPrimaryAction = async() => {
 <template>
   <div class="dashboard-container" v-if="isListMode">
     <div class="tabs">
-      <button :class="{ active: activeTab === 'enemy' }" @click="activeTab = 'enemy'">敌方目标</button>
+      <button :class="{ active: activeTab === 'enemy' }" @click="activeTab = 'enemy'">敌方武器</button>
       <button :class="{ active: activeTab === 'weapon' }" @click="activeTab = 'weapon'">武器装备</button>
       <button :class="{ active: activeTab === 'fire' }" @click="activeTab = 'fire'">弹药类型</button>
       <header class="refresh-header">
