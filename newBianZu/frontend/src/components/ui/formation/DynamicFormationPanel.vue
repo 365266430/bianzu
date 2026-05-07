@@ -18,8 +18,10 @@ import type {
 const resStore = useResStore()
 
 const loading = ref(false)
+const resetLoading = ref(false)
 const dataLoading = ref(false)
 const error = ref('')
+const notice = ref('')
 const activeTab = ref<'request' | 'result'>('request')
 const result = ref<DynamicFormationResult | null>(null)
 
@@ -313,6 +315,7 @@ async function loadParadigms() {
 
 async function generate() {
   error.value = ''
+  notice.value = ''
   const payload = buildPayload()
   if (!payload) {
     return
@@ -333,6 +336,25 @@ async function generate() {
     error.value = requestError?.message || '动态编组方案生成失败'
   } finally {
     loading.value = false
+  }
+}
+
+async function resetDqn() {
+  error.value = ''
+  notice.value = ''
+  resetLoading.value = true
+  try {
+    const response = await formationApi.resetDqn(true)
+    if (response?.code !== 200) {
+      error.value = response?.message || 'DQN 重置失败'
+      return
+    }
+    result.value = null
+    notice.value = 'DQN 已重置，经验池和本地模型已清空。'
+  } catch (requestError: any) {
+    error.value = requestError?.message || 'DQN 重置失败'
+  } finally {
+    resetLoading.value = false
   }
 }
 
@@ -455,9 +477,15 @@ onUnmounted(() => {
           </label>
         </div>
 
-        <button class="generate-btn" type="button" :disabled="loading" @click="generate">
-          {{ loading ? '生成中...' : '生成动态编组方案' }}
-        </button>
+        <div class="primary-actions">
+          <button class="generate-btn" type="button" :disabled="loading || resetLoading" @click="generate">
+            {{ loading ? '生成中...' : '生成动态编组方案' }}
+          </button>
+          <button class="reset-btn" type="button" :disabled="loading || resetLoading" @click="resetDqn">
+            {{ resetLoading ? '重置中...' : '重置 DQN' }}
+          </button>
+        </div>
+        <p v-if="notice" class="notice-text">{{ notice }}</p>
         <p v-if="error" class="error-text">{{ error }}</p>
       </aside>
 
@@ -805,24 +833,48 @@ onUnmounted(() => {
 }
 
 .generate-btn,
+.reset-btn,
 .tab-btn {
   border: none;
   cursor: pointer;
 }
 
-.generate-btn {
+.primary-actions {
   margin-top: 18px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+.generate-btn,
+.reset-btn {
   width: 100%;
   padding: 12px 16px;
   border-radius: 14px;
-  color: #fff;
   font-weight: 700;
+}
+
+.generate-btn {
+  color: #fff;
   background: linear-gradient(135deg, var(--blue-1), var(--blue-2));
 }
 
-.generate-btn:disabled {
+.reset-btn {
+  min-width: 104px;
+  color: #17384f;
+  border: 1px solid #b8cad8;
+  background: #f2f7fb;
+}
+
+.generate-btn:disabled,
+.reset-btn:disabled {
   opacity: 0.7;
   cursor: wait;
+}
+
+.notice-text {
+  margin-top: 10px;
+  color: #1e7d55;
 }
 
 .error-text,

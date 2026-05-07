@@ -37,4 +37,8 @@ public class DqnReplayBuffer {
     public synchronized int size() {
         return buffer.size();
     }
+
+    public synchronized void clear() {
+        buffer.clear();
+    }
 }

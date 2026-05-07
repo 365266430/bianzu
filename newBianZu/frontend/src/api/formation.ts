@@ -22,6 +22,12 @@ export const formationApi = {
     )
   },
 
+  async resetDqn(deleteSavedModel = true) {
+    return await request.post<never, ApiResponse<Record<string, unknown>>>(
+      `/api/dqn/reset?deleteSavedModel=${deleteSavedModel}`,
+    )
+  },
+
   async getParadigms() {
     return await request.get<any, ApiResponse<string[]>>('/formation/paradigms')
   },

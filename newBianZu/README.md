@@ -528,6 +528,31 @@ target network 参数
 featureNames
 ```
 
+当前模型重置机制：
+
+```text
+接口：
+POST /api/dqn/reset
+
+默认行为：
+1. 重置 online network 为固定随机初始权重
+2. 同步 target network
+3. 清空 ReplayBuffer
+4. 清空上一帧 episode 动作
+5. 重置 trainStep
+6. 删除本地模型文件 models/dqn-model.json
+
+可选参数：
+deleteSavedModel=false 时，只重置内存训练状态，不删除本地模型文件
+```
+
+示例：
+
+```text
+POST http://localhost:8080/api/dqn/reset
+POST http://localhost:8080/api/dqn/reset?deleteSavedModel=false
+```
+
 当前 episode 经验链：
 
 ```text

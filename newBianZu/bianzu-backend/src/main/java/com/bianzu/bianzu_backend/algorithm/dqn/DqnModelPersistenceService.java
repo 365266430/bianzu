@@ -51,4 +51,13 @@ public class DqnModelPersistenceService {
             return false;
         }
     }
+
+    public synchronized boolean deleteModel() {
+        try {
+            return Files.deleteIfExists(MODEL_PATH);
+        } catch (IOException e) {
+            System.err.println("Delete DQN model failed: " + e.getMessage());
+            return false;
+        }
+    }
 }

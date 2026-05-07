@@ -58,6 +58,10 @@ public class DqnNeuralQModel {
     private double targetOutputBias = 0D;
 
     public DqnNeuralQModel() {
+        reset();
+    }
+
+    public synchronized void reset() {
         Random random = new Random(42L);
         double inputScale = Math.sqrt(2D / INPUT_SIZE);
         double hiddenScale = Math.sqrt(2D / HIDDEN_SIZE);
@@ -66,8 +70,12 @@ public class DqnNeuralQModel {
             for (int i = 0; i < INPUT_SIZE; i++) {
                 inputHiddenWeights[h][i] = (random.nextDouble() * 2D - 1D) * inputScale;
             }
+            hiddenBias[h] = 0D;
             hiddenOutputWeights[h] = (random.nextDouble() * 2D - 1D) * hiddenScale;
+            targetHiddenBias[h] = 0D;
         }
+        outputBias = 0D;
+        targetOutputBias = 0D;
         syncTargetNetwork();
     }
 

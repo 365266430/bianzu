@@ -108,6 +108,16 @@ public class DqnTrainingService {
         return replayBuffer.size();
     }
 
+    public synchronized void resetTrainingState(boolean deleteSavedModel) {
+        replayBuffer.clear();
+        lastEpisodeAction = null;
+        trainStep = 0;
+        qModel.reset();
+        if (deleteSavedModel) {
+            modelPersistenceService.deleteModel();
+        }
+    }
+
     private double clamp(double value, double min, double max) {
         return Math.max(min, Math.min(max, value));
     }
