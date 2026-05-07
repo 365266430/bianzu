@@ -1,6 +1,7 @@
 package com.bianzu.bianzu_backend.algorithm.dqn;
 
 import com.bianzu.bianzu_backend.algorithm.dqn.model.DqnFeatureVector;
+import com.bianzu.bianzu_backend.algorithm.dqn.model.DqnModelSnapshot;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -115,6 +116,52 @@ public class DqnNeuralQModel {
         return FEATURE_NAMES;
     }
 
+    public synchronized DqnModelSnapshot snapshot() {
+        DqnModelSnapshot snapshot = new DqnModelSnapshot();
+        snapshot.setFeatureNames(FEATURE_NAMES);
+        snapshot.setInputHiddenWeights(copyMatrix(inputHiddenWeights));
+        snapshot.setHiddenBias(hiddenBias.clone());
+        snapshot.setHiddenOutputWeights(hiddenOutputWeights.clone());
+        snapshot.setOutputBias(outputBias);
+        snapshot.setTargetInputHiddenWeights(copyMatrix(targetInputHiddenWeights));
+        snapshot.setTargetHiddenBias(targetHiddenBias.clone());
+        snapshot.setTargetHiddenOutputWeights(targetHiddenOutputWeights.clone());
+        snapshot.setTargetOutputBias(targetOutputBias);
+        return snapshot;
+    }
+
+    public synchronized boolean restore(DqnModelSnapshot snapshot) {
+        if (snapshot == null
+                || snapshot.getInputHiddenWeights() == null
+                || snapshot.getInputHiddenWeights().length != HIDDEN_SIZE
+                || snapshot.getHiddenBias() == null
+                || snapshot.getHiddenBias().length != HIDDEN_SIZE
+                || snapshot.getHiddenOutputWeights() == null
+                || snapshot.getHiddenOutputWeights().length != HIDDEN_SIZE) {
+            return false;
+        }
+        if (!copyInto(snapshot.getInputHiddenWeights(), inputHiddenWeights)) {
+            return false;
+        }
+        System.arraycopy(snapshot.getHiddenBias(), 0, hiddenBias, 0, HIDDEN_SIZE);
+        System.arraycopy(snapshot.getHiddenOutputWeights(), 0, hiddenOutputWeights, 0, HIDDEN_SIZE);
+        outputBias = snapshot.getOutputBias();
+
+        if (snapshot.getTargetInputHiddenWeights() != null
+                && snapshot.getTargetHiddenBias() != null
+                && snapshot.getTargetHiddenOutputWeights() != null
+                && copyInto(snapshot.getTargetInputHiddenWeights(), targetInputHiddenWeights)
+                && snapshot.getTargetHiddenBias().length == HIDDEN_SIZE
+                && snapshot.getTargetHiddenOutputWeights().length == HIDDEN_SIZE) {
+            System.arraycopy(snapshot.getTargetHiddenBias(), 0, targetHiddenBias, 0, HIDDEN_SIZE);
+            System.arraycopy(snapshot.getTargetHiddenOutputWeights(), 0, targetHiddenOutputWeights, 0, HIDDEN_SIZE);
+            targetOutputBias = snapshot.getTargetOutputBias();
+        } else {
+            syncTargetNetwork();
+        }
+        return true;
+    }
+
     private ForwardPass forward(
             double[] input,
             double[][] firstLayerWeights,
@@ -172,6 +219,27 @@ public class DqnNeuralQModel {
 
     private double clamp(double value, double min, double max) {
         return Math.max(min, Math.min(max, value));
+    }
+
+    private double[][] copyMatrix(double[][] source) {
+        double[][] copy = new double[source.length][];
+        for (int i = 0; i < source.length; i++) {
+            copy[i] = source[i].clone();
+        }
+        return copy;
+    }
+
+    private boolean copyInto(double[][] source, double[][] target) {
+        if (source.length != target.length) {
+            return false;
+        }
+        for (int row = 0; row < target.length; row++) {
+            if (source[row] == null || source[row].length != target[row].length) {
+                return false;
+            }
+            System.arraycopy(source[row], 0, target[row], 0, target[row].length);
+        }
+        return true;
     }
 
     private record ForwardPass(double[] hiddenRaw, double[] hidden, double output) {

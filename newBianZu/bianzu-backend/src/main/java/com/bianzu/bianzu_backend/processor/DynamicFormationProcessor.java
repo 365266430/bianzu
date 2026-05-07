@@ -312,8 +312,14 @@ public class DynamicFormationProcessor implements SimulationProcessor {
             candidateByAction.put(pendingCandidate.scoredAction(), pendingCandidate);
         }
         List<ThreatScoredAssignment> scored = new ArrayList<>();
+        boolean episodeStepObserved = false;
         for (DqnScoredAction rankedAction : rankedActions) {
-            dqnTrainingService.observeImmediate(rankedAction, false, 0.001D, 32, 10);
+            if (!episodeStepObserved) {
+                dqnTrainingService.observeEpisodeStep(rankedAction, false, 0.001D, 32, 0.95D, 10);
+                episodeStepObserved = true;
+            } else {
+                dqnTrainingService.observeImmediate(rankedAction, false, 0.001D, 32, 10);
+            }
             PendingThreatCandidate pendingCandidate = candidateByAction.get(rankedAction);
             if (pendingCandidate != null) {
                 scored.add(new ThreatScoredAssignment(

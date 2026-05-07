@@ -19,7 +19,11 @@ public class DqnTrainingService {
     @Autowired
     private DqnNeuralQModel qModel;
 
+    @Autowired
+    private DqnModelPersistenceService modelPersistenceService;
+
     private int trainStep = 0;
+    private DqnScoredAction lastEpisodeAction;
 
     public void observeImmediate(DqnScoredAction scoredAction, boolean invalidAction, double learningRate, int batchSize) {
         observeImmediate(scoredAction, invalidAction, learningRate, batchSize, 10);
@@ -38,6 +42,38 @@ public class DqnTrainingService {
                 true);
         replayBuffer.add(experience);
         trainBatch(Math.max(batchSize, 1), learningRate, 0.95D, targetUpdateFreq);
+    }
+
+    public synchronized void observeEpisodeStep(
+            DqnScoredAction currentAction,
+            boolean invalidAction,
+            double learningRate,
+            int batchSize,
+            double gamma,
+            int targetUpdateFreq) {
+        if (currentAction == null || currentAction.getFeatureVector() == null) {
+            return;
+        }
+        if (lastEpisodeAction != null && lastEpisodeAction.getFeatureVector() != null) {
+            double reward = rewardCalculator.estimateImmediateReward(lastEpisodeAction.getFeatureVector(), invalidAction);
+            DqnExperience experience = new DqnExperience(
+                    lastEpisodeAction.getFeatureVector(),
+                    lastEpisodeAction.getAction(),
+                    reward,
+                    currentAction.getFeatureVector(),
+                    false);
+            replayBuffer.add(experience);
+            trainBatch(Math.max(batchSize, 1), learningRate, gamma, targetUpdateFreq);
+        }
+        lastEpisodeAction = currentAction;
+    }
+
+    public synchronized void finishEpisode(double learningRate, int batchSize, int targetUpdateFreq) {
+        if (lastEpisodeAction == null || lastEpisodeAction.getFeatureVector() == null) {
+            return;
+        }
+        observeImmediate(lastEpisodeAction, false, learningRate, batchSize, targetUpdateFreq);
+        lastEpisodeAction = null;
     }
 
     public double trainBatch(int batchSize, double learningRate, double gamma) {
@@ -62,6 +98,7 @@ public class DqnTrainingService {
             int syncFreq = Math.max(targetUpdateFreq, 1);
             if (trainStep % syncFreq == 0) {
                 qModel.syncTargetNetwork();
+                modelPersistenceService.saveModel();
             }
         }
         return totalAbsError / batch.size();

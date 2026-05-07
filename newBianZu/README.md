@@ -22,9 +22,11 @@
 已完成：在线 TD 更新
 已完成：Target Network
 已完成：epsilon-greedy 在线探索
+已完成：模型持久化
+已完成：跨 tick 的 s -> s' episode 经验链
 已完成：动态方案生成接口接入
 已完成：仿真 tick 动态编组接入
-未完成：模型持久化与离线训练任务
+未完成：离线训练任务与评估报表
 ```
 
 需要特别说明：当前版本还不是严格意义上的深度神经网络 DQN。
@@ -41,7 +43,7 @@
 input feature vector -> hidden layer(32, ReLU) -> output(sigmoid Q)
 ```
 
-当前已经补齐 DQN 的核心在线训练结构，包括 Target Network 和 epsilon-greedy 探索。后续仍需要模型持久化、更完整的离线训练任务和评估报表。
+当前已经补齐 DQN 的核心在线训练结构，包括 Target Network、epsilon-greedy 探索、模型持久化，以及跨 tick 的 `s -> s'` episode 经验链。后续仍需要更完整的离线训练任务和评估报表。
 
 当前新增的核心类：
 
@@ -57,13 +59,15 @@ input feature vector -> hidden layer(32, ReLU) -> output(sigmoid Q)
 | `algorithm/dqn/DqnNeuralQModel.java` | 当前神经网络 Q 估计器，结构为 input -> hidden(32, ReLU) -> output(sigmoid) |
 | `algorithm/dqn/DqnTrainingService.java` | 负责写入经验并执行 TD 更新 |
 | `algorithm/dqn/DqnPolicyService.java` | 对候选动作输出最终 Q 值 |
+| `algorithm/dqn/DqnModelPersistenceService.java` | 保存和加载神经网络参数 |
+| `algorithm/dqn/model/DqnModelSnapshot.java` | 模型权重快照 DTO |
 
 当前接入点：
 
 | 文件 | 接入内容 |
 | --- | --- |
 | `service/DynamicFormationPlanningService.java` | 接口生成动态编组方案时，候选动作通过 `DqnPolicyService` 评分，并调用 `DqnTrainingService` 在线更新 |
-| `processor/DynamicFormationProcessor.java` | 仿真 tick 中，候选动作通过 `DqnPolicyService` 评分，并写入经验池训练 |
+| `processor/DynamicFormationProcessor.java` | 仿真 tick 中，候选动作通过 `DqnPolicyService` 评分；排名最高动作接入跨 tick episode 经验链，其他候选作为即时经验补充训练 |
 
 ## 1. 建模目标
 
@@ -507,6 +511,41 @@ target network = online network
 同步频率由 targetUpdateFreq 控制
 ```
 
+当前模型持久化机制：
+
+```text
+保存文件：bianzu-backend/models/dqn-model.json
+
+后端启动：
+DqnModelPersistenceService 自动尝试加载模型文件
+
+训练过程中：
+每次 Target Network 同步时保存当前模型快照
+
+保存内容：
+online network 参数
+target network 参数
+featureNames
+```
+
+当前 episode 经验链：
+
+```text
+仿真 tick t：
+选择当前排名最高候选动作 action_t
+
+仿真 tick t+1：
+选择新的排名最高候选动作 action_t+1
+写入经验：
+(state_t, action_t, reward_t, state_t+1, done=false)
+
+其中：
+state_t      = action_t 的 DqnFeatureVector
+action_t     = action_t 的 DqnAction
+reward_t     = 根据 action_t 特征计算的即时奖励
+state_t+1    = action_t+1 的 DqnFeatureVector
+```
+
 当前 epsilon-greedy 探索机制：
 
 ```text
@@ -560,8 +599,10 @@ planCount
 [已完成] 6. 增加 DqnNeuralQModel，支持神经网络 Q 估计和在线反向传播
 [已完成] 7. 接入动态方案生成和仿真 tick 流程
 [已完成] 8. 增加 Target Network 和 epsilon-greedy 探索
-[待完成] 9. 增加模型持久化、离线训练和评估报表
-[待完成] 10. 对比启发式策略、神经网络 Q 策略和完整 DQN 策略的拦截率、成本、漏防率
+[已完成] 9. 增加模型持久化
+[已完成] 10. 接入跨 tick 的 s -> s' episode 经验链
+[待完成] 11. 增加离线训练和评估报表
+[待完成] 12. 对比启发式策略、神经网络 Q 策略和完整 DQN 策略的拦截率、成本、漏防率
 ```
 
 ## 12. 评估指标
