@@ -11,7 +11,7 @@ import java.util.List;
 public class DqnPolicyService {
 
     @Autowired
-    private DqnLinearQModel qModel;
+    private DqnNeuralQModel qModel;
 
     /**
      * 对候选动作进行DQN策略评分，计算其Q值。

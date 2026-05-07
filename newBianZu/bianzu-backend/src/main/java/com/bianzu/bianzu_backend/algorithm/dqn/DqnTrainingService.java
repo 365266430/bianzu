@@ -17,7 +17,7 @@ public class DqnTrainingService {
     private DqnRewardCalculator rewardCalculator;
 
     @Autowired
-    private DqnLinearQModel qModel;
+    private DqnNeuralQModel qModel;
 
     public void observeImmediate(DqnScoredAction scoredAction, boolean invalidAction, double learningRate, int batchSize) {
         if (scoredAction == null || scoredAction.getFeatureVector() == null) {

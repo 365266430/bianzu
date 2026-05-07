@@ -18,11 +18,10 @@
 已完成：候选动作特征向量构造
 已完成：即时奖励计算器
 已完成：经验回放缓冲区 ReplayBuffer
-已完成：线性 Q 估计器
+已完成：神经网络 Q 估计器
 已完成：在线 TD 更新
 已完成：动态方案生成接口接入
 已完成：仿真 tick 动态编组接入
-未完成：神经网络 Q(s, a)
 未完成：Target Network
 未完成：epsilon-greedy 在线探索
 未完成：模型持久化与离线训练任务
@@ -33,10 +32,16 @@
 当前实现可以描述为：
 
 ```text
-当前版本 = DQN 工程结构 + 线性 Q 学习模型 + 启发式冷启动
+当前版本 = DQN 工程结构 + 神经网络 Q 模型 + 经验回放 + 启发式冷启动
 ```
 
-它已经不再是纯固定启发式评分，因为 `DqnLinearQModel` 会根据 reward 对权重进行在线更新；但它仍然不是深度学习模型，后续需要将线性 Q 模型替换为神经网络 Q 模型，才能成为完整 DQN。
+它已经不再是纯固定启发式评分，也不再是线性 Q 学习模型。当前 `DqnNeuralQModel` 使用 Java 实现了一个小型 MLP 网络：
+
+```text
+input feature vector -> hidden layer(32, ReLU) -> output(sigmoid Q)
+```
+
+但它仍不是完整 DQN，后续还需要增加 Target Network、epsilon-greedy 探索、模型持久化和更完整的离线训练/评估流程。
 
 当前新增的核心类：
 
@@ -49,7 +54,7 @@
 | `algorithm/dqn/DqnFeatureBuilder.java` | 从敌方、武器、弹种、保护区构造特征 |
 | `algorithm/dqn/DqnRewardCalculator.java` | 计算即时奖励 |
 | `algorithm/dqn/DqnReplayBuffer.java` | 保存经验回放样本 |
-| `algorithm/dqn/DqnLinearQModel.java` | 当前可训练线性 Q 估计器 |
+| `algorithm/dqn/DqnNeuralQModel.java` | 当前神经网络 Q 估计器，结构为 input -> hidden(32, ReLU) -> output(sigmoid) |
 | `algorithm/dqn/DqnTrainingService.java` | 负责写入经验并执行 TD 更新 |
 | `algorithm/dqn/DqnPolicyService.java` | 对候选动作输出最终 Q 值 |
 
@@ -327,7 +332,7 @@ algorithm/dqn/DqnActionGenerator.java
 algorithm/dqn/DqnRewardCalculator.java
 algorithm/dqn/DqnPolicyService.java
 algorithm/dqn/DqnReplayBuffer.java
-algorithm/dqn/DqnLinearQModel.java
+algorithm/dqn/DqnNeuralQModel.java
 algorithm/dqn/DqnTrainingService.java
 algorithm/dqn/model/DqnAction.java
 algorithm/dqn/model/DqnExperience.java
@@ -342,9 +347,9 @@ algorithm/dqn/model/DqnScoredAction.java
 | `DqnFeatureBuilder` | 将敌方、武器、弹种、保护区转换为模型输入特征 |
 | `DqnActionGenerator` | 复用现有匹配逻辑生成合法候选动作 |
 | `DqnRewardCalculator` | 计算即时奖励 |
-| `DqnPolicyService` | 输出候选动作 Q 值，当前融合启发式冷启动和线性 Q 模型 |
+| `DqnPolicyService` | 输出候选动作 Q 值，当前融合启发式冷启动和神经网络 Q 模型 |
 | `DqnReplayBuffer` | 保存经验回放数据 |
-| `DqnLinearQModel` | 当前可训练线性 Q 估计器，后续可替换为神经网络 |
+| `DqnNeuralQModel` | 当前神经网络 Q 估计器，使用隐藏层和反向传播更新 |
 | `DqnTrainingService` | 负责写入经验、采样 batch、执行 TD 更新 |
 | `DqnAction` | 描述 `weaponId + fireType + enemyId` |
 | `DqnExperience` | 描述 `(s, a, r, s', done)` |
@@ -430,7 +435,7 @@ maxGroupSize 编组规模约束
 
 ## 10. 训练流程
 
-DQN 标准训练流程如下。当前版本已经实现 ReplayBuffer、reward 计算、batch 采样和 TD 更新，但 Q 模型暂时是线性模型，不是神经网络：
+DQN 标准训练流程如下。当前版本已经实现 ReplayBuffer、reward 计算、batch 采样、神经网络 Q 估计和 TD 更新：
 
 ```text
 初始化 Q 网络和 Target Q 网络
@@ -462,18 +467,29 @@ for epoch in epochs:
 7. 计算 target
    - done=true 或 nextState=null 时：target = reward
    - 否则：target = reward + gamma * Q(nextState)
-8. DqnLinearQModel 按误差更新权重
+8. DqnNeuralQModel 按 TD error 反向传播更新网络权重
 ```
 
-当前线性 Q 更新公式：
+当前神经网络结构：
 
 ```text
-prediction = bias + Σ(weight_i * feature_i)
-error = target - prediction
-weight_i = weight_i + learningRate * error * feature_i
-bias = bias + learningRate * error
-Q = clamp(prediction, 0, 1)
+input = DqnFeatureVector 固定特征顺序
+hidden = ReLU(W1 * input + b1)
+Q = sigmoid(W2 * hidden + b2)
+loss = 0.5 * (target - Q)^2
 ```
+
+当前 TD target：
+
+```text
+done=true 或 nextState=null：
+target = reward
+
+否则：
+target = reward + gamma * Q(nextState)
+```
+
+训练时根据 `target - Q` 对输出层和隐藏层执行反向传播。
 
 项目中已有配置类 `DynamicAlgorithmConfigDTO`，可以继续使用：
 
@@ -513,12 +529,11 @@ planCount
 [已完成] 3. 将现有启发式分数改造成可记录的冷启动分数
 [已完成] 4. 实现 DqnPolicyService，输出候选动作 Q 值
 [已完成] 5. 增加 ReplayBuffer 和 RewardCalculator
-[已完成] 6. 增加 DqnLinearQModel，支持在线权重更新
+[已完成] 6. 增加 DqnNeuralQModel，支持神经网络 Q 估计和在线反向传播
 [已完成] 7. 接入动态方案生成和仿真 tick 流程
-[待完成] 8. 接入真实神经网络 DQN 模型推理
-[待完成] 9. 增加 Target Network 和 epsilon-greedy 探索
-[待完成] 10. 增加模型持久化、离线训练和评估报表
-[待完成] 11. 对比启发式策略、线性 Q 学习策略和 DQN 策略的拦截率、成本、漏防率
+[待完成] 8. 增加 Target Network 和 epsilon-greedy 探索
+[待完成] 9. 增加模型持久化、离线训练和评估报表
+[待完成] 10. 对比启发式策略、神经网络 Q 策略和完整 DQN 策略的拦截率、成本、漏防率
 ```
 
 ## 12. 评估指标
