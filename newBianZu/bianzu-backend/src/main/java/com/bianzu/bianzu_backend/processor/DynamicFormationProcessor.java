@@ -245,7 +245,7 @@ public class DynamicFormationProcessor implements SimulationProcessor {
                 .sum();
 
         // 构建威胁评分列表
-        List<ThreatScoredAssignment> scored = new ArrayList<>();
+        List<PendingThreatCandidate> pendingCandidates = new ArrayList<>();
         for (WeaponFireAssignment candidate : candidates) {
             FireType fireType = fireTypeMap.get(candidate.getFireType());
             if (fireType == null) continue;
@@ -299,13 +299,29 @@ public class DynamicFormationProcessor implements SimulationProcessor {
                     safeList(availableWeapons).size(),
                     totalAmmo,
                     safeList(zones).size());
-            DqnScoredAction scoredAction = dqnPolicyService.score(new DqnScoredAction(action, featureVector, totalScore, null));
-            dqnTrainingService.observeImmediate(scoredAction, false, 0.001D, 32);
-            scored.add(new ThreatScoredAssignment(candidate, scoredAction.getQValue(), threatScore));
+            DqnScoredAction scoredAction = new DqnScoredAction(action, featureVector, totalScore, null);
+            pendingCandidates.add(new PendingThreatCandidate(scoredAction, candidate, threatScore));
         }
 
         // 按威胁等级和综合评分排序
-        scored.sort(Comparator.comparingDouble(ThreatScoredAssignment::score).reversed());
+        List<DqnScoredAction> rankedActions = dqnPolicyService.scoreAll(
+                pendingCandidates.stream().map(PendingThreatCandidate::scoredAction).toList(),
+                0.1D);
+        Map<DqnScoredAction, PendingThreatCandidate> candidateByAction = new IdentityHashMap<>();
+        for (PendingThreatCandidate pendingCandidate : pendingCandidates) {
+            candidateByAction.put(pendingCandidate.scoredAction(), pendingCandidate);
+        }
+        List<ThreatScoredAssignment> scored = new ArrayList<>();
+        for (DqnScoredAction rankedAction : rankedActions) {
+            dqnTrainingService.observeImmediate(rankedAction, false, 0.001D, 32, 10);
+            PendingThreatCandidate pendingCandidate = candidateByAction.get(rankedAction);
+            if (pendingCandidate != null) {
+                scored.add(new ThreatScoredAssignment(
+                        pendingCandidate.assignment(),
+                        rankedAction.getQValue() == null ? 0D : rankedAction.getQValue(),
+                        pendingCandidate.threatScore()));
+            }
+        }
 
         // 贪心分配
         Set<String> usedWeapons = new HashSet<>();
@@ -469,6 +485,12 @@ public class DynamicFormationProcessor implements SimulationProcessor {
     }
 
     private record ThreatScoredAssignment(WeaponFireAssignment assignment, double score, double threatScore) {
+    }
+
+    private record PendingThreatCandidate(
+            DqnScoredAction scoredAction,
+            WeaponFireAssignment assignment,
+            double threatScore) {
     }
 
     /**

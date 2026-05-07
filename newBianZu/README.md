@@ -20,10 +20,10 @@
 已完成：经验回放缓冲区 ReplayBuffer
 已完成：神经网络 Q 估计器
 已完成：在线 TD 更新
+已完成：Target Network
+已完成：epsilon-greedy 在线探索
 已完成：动态方案生成接口接入
 已完成：仿真 tick 动态编组接入
-未完成：Target Network
-未完成：epsilon-greedy 在线探索
 未完成：模型持久化与离线训练任务
 ```
 
@@ -41,7 +41,7 @@
 input feature vector -> hidden layer(32, ReLU) -> output(sigmoid Q)
 ```
 
-但它仍不是完整 DQN，后续还需要增加 Target Network、epsilon-greedy 探索、模型持久化和更完整的离线训练/评估流程。
+当前已经补齐 DQN 的核心在线训练结构，包括 Target Network 和 epsilon-greedy 探索。后续仍需要模型持久化、更完整的离线训练任务和评估报表。
 
 当前新增的核心类：
 
@@ -466,8 +466,9 @@ for epoch in epochs:
 6. 从 ReplayBuffer 采样 batch
 7. 计算 target
    - done=true 或 nextState=null 时：target = reward
-   - 否则：target = reward + gamma * Q(nextState)
+   - 否则：target = reward + gamma * Q_target(nextState)
 8. DqnNeuralQModel 按 TD error 反向传播更新网络权重
+9. 每 targetUpdateFreq 步同步一次 Target Network
 ```
 
 当前神经网络结构：
@@ -486,10 +487,37 @@ done=true 或 nextState=null：
 target = reward
 
 否则：
-target = reward + gamma * Q(nextState)
+target = reward + gamma * Q_target(nextState)
 ```
 
 训练时根据 `target - Q` 对输出层和隐藏层执行反向传播。
+
+当前 Target Network 机制：
+
+```text
+online network: DqnNeuralQModel 当前训练网络
+target network: online network 的参数快照
+
+训练时：
+Q(s, a) 使用 online network
+Q_target(s') 使用 target network
+
+同步时：
+target network = online network
+同步频率由 targetUpdateFreq 控制
+```
+
+当前 epsilon-greedy 探索机制：
+
+```text
+1. 对所有候选动作计算 Q 值
+2. 生成随机数 p
+3. 如果 p < epsilon：
+   随机选择一个候选动作，并将其提升到本轮排序首位
+4. 如果 p >= epsilon：
+   按 Q 值从高到低排序
+5. 后续仍由规则层执行一武器一次、一目标一次、弹药、射程、射高等约束
+```
 
 项目中已有配置类 `DynamicAlgorithmConfigDTO`，可以继续使用：
 
@@ -531,7 +559,7 @@ planCount
 [已完成] 5. 增加 ReplayBuffer 和 RewardCalculator
 [已完成] 6. 增加 DqnNeuralQModel，支持神经网络 Q 估计和在线反向传播
 [已完成] 7. 接入动态方案生成和仿真 tick 流程
-[待完成] 8. 增加 Target Network 和 epsilon-greedy 探索
+[已完成] 8. 增加 Target Network 和 epsilon-greedy 探索
 [待完成] 9. 增加模型持久化、离线训练和评估报表
 [待完成] 10. 对比启发式策略、神经网络 Q 策略和完整 DQN 策略的拦截率、成本、漏防率
 ```

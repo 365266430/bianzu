@@ -515,8 +515,12 @@ public class DynamicFormationPlanningService {
         Set<String> allowedDomains = resolveAllowedDomains(request.getParadigm());
         double learningRate = request.getConfig() == null || request.getConfig().getLearningRate() == null
                 ? 0.001D : request.getConfig().getLearningRate();
+        double epsilon = request.getConfig() == null || request.getConfig().getEpsilon() == null
+                ? 0.1D : request.getConfig().getEpsilon();
         int batchSize = request.getConfig() == null || request.getConfig().getBatchSize() == null
                 ? 32 : request.getConfig().getBatchSize();
+        int targetUpdateFreq = request.getConfig() == null || request.getConfig().getTargetUpdateFreq() == null
+                ? 10 : request.getConfig().getTargetUpdateFreq();
         int totalAmmo = availableWeapons.stream()
                 .flatMap(weapon -> safeList(weapon.getAmmoStates()).stream())
                 .mapToInt(ammo -> ammo.getCurrentCount() == null ? 0 : ammo.getCurrentCount())
@@ -534,7 +538,7 @@ public class DynamicFormationPlanningService {
                 .collect(Collectors.toMap(EnemyType::getType, item -> item, (left, right) -> left, LinkedHashMap::new));
 
         // 先展开所有可行候选，并为后续排序生成统一得分。
-        List<ScoredCandidate> scoredCandidates = new ArrayList<>();
+        List<PendingDqnCandidate> pendingCandidates = new ArrayList<>();
         for (WeaponNode weapon : availableWeapons) {
             WeaponType weaponType = weaponTypeMap.get(weapon.getType());
             String deployDomain = normalizeDomain(weaponType == null ? null : weaponType.getDeployDomain());
@@ -587,12 +591,35 @@ public class DynamicFormationPlanningService {
                         availableWeapons.size(),
                         totalAmmo,
                         safeList(request.getZones()).size());
-                DqnScoredAction scoredAction = dqnPolicyService.score(new DqnScoredAction(action, featureVector, heuristicScore, null));
-                dqnTrainingService.observeImmediate(scoredAction, false, learningRate, batchSize);
-                scoredCandidates.add(new ScoredCandidate(weapon, enemy, bestFireType, deployDomain, sourceZone, distanceKm, dispatchCost, targetInZone, scoredAction.getQValue()));
+                DqnScoredAction scoredAction = new DqnScoredAction(action, featureVector, heuristicScore, null);
+                ScoredCandidate candidate = new ScoredCandidate(weapon, enemy, bestFireType, deployDomain, sourceZone, distanceKm, dispatchCost, targetInZone, heuristicScore);
+                pendingCandidates.add(new PendingDqnCandidate(scoredAction, candidate));
             }
         }
-        scoredCandidates.sort(Comparator.comparingDouble(ScoredCandidate::score).reversed());
+        List<DqnScoredAction> rankedActions = dqnPolicyService.scoreAll(
+                pendingCandidates.stream().map(PendingDqnCandidate::scoredAction).toList(),
+                epsilon);
+        Map<DqnScoredAction, ScoredCandidate> candidateByAction = new IdentityHashMap<>();
+        for (PendingDqnCandidate pendingCandidate : pendingCandidates) {
+            candidateByAction.put(pendingCandidate.scoredAction(), pendingCandidate.candidate());
+        }
+        List<ScoredCandidate> scoredCandidates = new ArrayList<>();
+        for (DqnScoredAction rankedAction : rankedActions) {
+            dqnTrainingService.observeImmediate(rankedAction, false, learningRate, batchSize, targetUpdateFreq);
+            ScoredCandidate candidate = candidateByAction.get(rankedAction);
+            if (candidate != null) {
+                scoredCandidates.add(new ScoredCandidate(
+                        candidate.weapon(),
+                        candidate.enemy(),
+                        candidate.fireType(),
+                        candidate.deployDomain(),
+                        candidate.sourceZone(),
+                        candidate.distanceKm(),
+                        candidate.dispatchCost(),
+                        candidate.targetInZone(),
+                        rankedAction.getQValue() == null ? 0D : rankedAction.getQValue()));
+            }
+        }
         if (scoredCandidates.isEmpty()) {
             return new ArrayList<>();
         }
@@ -861,5 +888,10 @@ public class DynamicFormationPlanningService {
             double dispatchCost,
             boolean targetInZone,
             double score) {
+    }
+
+    private record PendingDqnCandidate(
+            DqnScoredAction scoredAction,
+            ScoredCandidate candidate) {
     }
 }

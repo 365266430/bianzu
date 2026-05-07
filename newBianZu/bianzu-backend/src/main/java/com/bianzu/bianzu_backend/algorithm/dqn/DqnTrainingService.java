@@ -19,7 +19,13 @@ public class DqnTrainingService {
     @Autowired
     private DqnNeuralQModel qModel;
 
+    private int trainStep = 0;
+
     public void observeImmediate(DqnScoredAction scoredAction, boolean invalidAction, double learningRate, int batchSize) {
+        observeImmediate(scoredAction, invalidAction, learningRate, batchSize, 10);
+    }
+
+    public void observeImmediate(DqnScoredAction scoredAction, boolean invalidAction, double learningRate, int batchSize, int targetUpdateFreq) {
         if (scoredAction == null || scoredAction.getFeatureVector() == null) {
             return;
         }
@@ -31,10 +37,14 @@ public class DqnTrainingService {
                 null,
                 true);
         replayBuffer.add(experience);
-        trainBatch(Math.max(batchSize, 1), learningRate, 0.95D);
+        trainBatch(Math.max(batchSize, 1), learningRate, 0.95D, targetUpdateFreq);
     }
 
     public double trainBatch(int batchSize, double learningRate, double gamma) {
+        return trainBatch(batchSize, learningRate, gamma, 10);
+    }
+
+    public double trainBatch(int batchSize, double learningRate, double gamma, int targetUpdateFreq) {
         List<DqnExperience> batch = replayBuffer.sample(batchSize);
         if (batch.isEmpty()) {
             return 0D;
@@ -46,8 +56,13 @@ public class DqnTrainingService {
             boolean done = Boolean.TRUE.equals(experience.getDone()) || experience.getNextState() == null;
             double target = done
                     ? reward
-                    : reward + clamp(gamma, 0D, 1D) * qModel.predict(experience.getNextState());
+                    : reward + clamp(gamma, 0D, 1D) * qModel.predictTarget(experience.getNextState());
             totalAbsError += Math.abs(qModel.train(experience.getState(), target, learningRate));
+            trainStep++;
+            int syncFreq = Math.max(targetUpdateFreq, 1);
+            if (trainStep % syncFreq == 0) {
+                qModel.syncTargetNetwork();
+            }
         }
         return totalAbsError / batch.size();
     }

@@ -51,6 +51,10 @@ public class DqnNeuralQModel {
     private final double[] hiddenBias = new double[HIDDEN_SIZE];
     private final double[] hiddenOutputWeights = new double[HIDDEN_SIZE];
     private double outputBias = 0D;
+    private final double[][] targetInputHiddenWeights = new double[HIDDEN_SIZE][INPUT_SIZE];
+    private final double[] targetHiddenBias = new double[HIDDEN_SIZE];
+    private final double[] targetHiddenOutputWeights = new double[HIDDEN_SIZE];
+    private double targetOutputBias = 0D;
 
     public DqnNeuralQModel() {
         Random random = new Random(42L);
@@ -63,16 +67,31 @@ public class DqnNeuralQModel {
             }
             hiddenOutputWeights[h] = (random.nextDouble() * 2D - 1D) * hiddenScale;
         }
+        syncTargetNetwork();
     }
 
     public synchronized double predict(DqnFeatureVector vector) {
-        ForwardPass pass = forward(toInput(vector));
+        ForwardPass pass = forward(toInput(vector), inputHiddenWeights, hiddenBias, hiddenOutputWeights, outputBias);
         return pass.output();
+    }
+
+    public synchronized double predictTarget(DqnFeatureVector vector) {
+        ForwardPass pass = forward(toInput(vector), targetInputHiddenWeights, targetHiddenBias, targetHiddenOutputWeights, targetOutputBias);
+        return pass.output();
+    }
+
+    public synchronized void syncTargetNetwork() {
+        for (int h = 0; h < HIDDEN_SIZE; h++) {
+            System.arraycopy(inputHiddenWeights[h], 0, targetInputHiddenWeights[h], 0, INPUT_SIZE);
+            targetHiddenBias[h] = hiddenBias[h];
+            targetHiddenOutputWeights[h] = hiddenOutputWeights[h];
+        }
+        targetOutputBias = outputBias;
     }
 
     public synchronized double train(DqnFeatureVector vector, double target, double learningRate) {
         double[] input = toInput(vector);
-        ForwardPass pass = forward(input);
+        ForwardPass pass = forward(input, inputHiddenWeights, hiddenBias, hiddenOutputWeights, outputBias);
         double clippedTarget = clamp(target, 0D, 1D);
         double prediction = pass.output();
         double error = clippedTarget - prediction;
@@ -96,22 +115,27 @@ public class DqnNeuralQModel {
         return FEATURE_NAMES;
     }
 
-    private ForwardPass forward(double[] input) {
+    private ForwardPass forward(
+            double[] input,
+            double[][] firstLayerWeights,
+            double[] firstLayerBias,
+            double[] secondLayerWeights,
+            double secondLayerBias) {
         double[] hiddenRaw = new double[HIDDEN_SIZE];
         double[] hidden = new double[HIDDEN_SIZE];
 
         for (int h = 0; h < HIDDEN_SIZE; h++) {
-            double value = hiddenBias[h];
+            double value = firstLayerBias[h];
             for (int i = 0; i < INPUT_SIZE; i++) {
-                value += inputHiddenWeights[h][i] * input[i];
+                value += firstLayerWeights[h][i] * input[i];
             }
             hiddenRaw[h] = value;
             hidden[h] = relu(value);
         }
 
-        double outputRaw = outputBias;
+        double outputRaw = secondLayerBias;
         for (int h = 0; h < HIDDEN_SIZE; h++) {
-            outputRaw += hiddenOutputWeights[h] * hidden[h];
+            outputRaw += secondLayerWeights[h] * hidden[h];
         }
         return new ForwardPass(hiddenRaw, hidden, sigmoid(outputRaw));
     }

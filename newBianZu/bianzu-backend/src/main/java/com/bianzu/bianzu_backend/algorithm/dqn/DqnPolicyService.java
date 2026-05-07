@@ -5,13 +5,18 @@ import com.bianzu.bianzu_backend.algorithm.dqn.model.DqnScoredAction;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Random;
 
 @Service
 public class DqnPolicyService {
 
     @Autowired
     private DqnNeuralQModel qModel;
+
+    private final Random random = new Random();
 
     /**
      * 对候选动作进行DQN策略评分，计算其Q值。
@@ -30,6 +35,31 @@ public class DqnPolicyService {
     }
 
     public List<DqnScoredAction> scoreAll(List<DqnScoredAction> candidates) {
+        return scoreAll(candidates, 0D);
+    }
+
+    public List<DqnScoredAction> scoreAll(List<DqnScoredAction> candidates, double epsilon) {
+        if (candidates == null || candidates.isEmpty()) {
+            return List.of();
+        }
+        List<DqnScoredAction> scored = new ArrayList<>(candidates.stream()
+                .map(this::score)
+                .toList());
+        if (random.nextDouble() < clamp(epsilon, 0D, 1D)) {
+            int selectedIndex = random.nextInt(scored.size());
+            double maxQ = scored.stream()
+                    .map(DqnScoredAction::getQValue)
+                    .filter(value -> value != null)
+                    .max(Double::compareTo)
+                    .orElse(0D);
+            scored.get(selectedIndex).setQValue(Math.min(1D, maxQ + 0.0001D));
+        }
+        scored.sort(Comparator.comparingDouble((DqnScoredAction item) ->
+                item.getQValue() == null ? 0D : item.getQValue()).reversed());
+        return scored;
+    }
+
+    public List<DqnScoredAction> scoreAllGreedy(List<DqnScoredAction> candidates) {
         return candidates.stream()
                 .map(this::score)
                 .sorted((left, right) -> Double.compare(
