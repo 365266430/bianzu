@@ -9,6 +9,57 @@
 - 仿真流水线：`bianzu-backend/src/main/java/com/bianzu/bianzu_backend/service/SimulationEngineService.java`
 - 仿真上下文：`bianzu-backend/src/main/java/com/bianzu/bianzu_backend/model/SimulationContext.java`
 
+## 当前实现状态
+
+截至当前版本，项目已经完成了 DQN 动态编组的第一阶段和第二阶段雏形：
+
+```text
+已完成：DQN 候选动作建模
+已完成：候选动作特征向量构造
+已完成：即时奖励计算器
+已完成：经验回放缓冲区 ReplayBuffer
+已完成：线性 Q 估计器
+已完成：在线 TD 更新
+已完成：动态方案生成接口接入
+已完成：仿真 tick 动态编组接入
+未完成：神经网络 Q(s, a)
+未完成：Target Network
+未完成：epsilon-greedy 在线探索
+未完成：模型持久化与离线训练任务
+```
+
+需要特别说明：当前版本还不是严格意义上的深度神经网络 DQN。
+
+当前实现可以描述为：
+
+```text
+当前版本 = DQN 工程结构 + 线性 Q 学习模型 + 启发式冷启动
+```
+
+它已经不再是纯固定启发式评分，因为 `DqnLinearQModel` 会根据 reward 对权重进行在线更新；但它仍然不是深度学习模型，后续需要将线性 Q 模型替换为神经网络 Q 模型，才能成为完整 DQN。
+
+当前新增的核心类：
+
+| 类 | 作用 |
+| --- | --- |
+| `algorithm/dqn/model/DqnAction.java` | 定义动作 `weaponId + fireType + enemyId` |
+| `algorithm/dqn/model/DqnFeatureVector.java` | 保存候选动作特征向量 |
+| `algorithm/dqn/model/DqnScoredAction.java` | 保存候选动作、特征、启发式分数和 Q 值 |
+| `algorithm/dqn/model/DqnExperience.java` | 定义经验样本 `(s, a, r, s', done)` |
+| `algorithm/dqn/DqnFeatureBuilder.java` | 从敌方、武器、弹种、保护区构造特征 |
+| `algorithm/dqn/DqnRewardCalculator.java` | 计算即时奖励 |
+| `algorithm/dqn/DqnReplayBuffer.java` | 保存经验回放样本 |
+| `algorithm/dqn/DqnLinearQModel.java` | 当前可训练线性 Q 估计器 |
+| `algorithm/dqn/DqnTrainingService.java` | 负责写入经验并执行 TD 更新 |
+| `algorithm/dqn/DqnPolicyService.java` | 对候选动作输出最终 Q 值 |
+
+当前接入点：
+
+| 文件 | 接入内容 |
+| --- | --- |
+| `service/DynamicFormationPlanningService.java` | 接口生成动态编组方案时，候选动作通过 `DqnPolicyService` 评分，并调用 `DqnTrainingService` 在线更新 |
+| `processor/DynamicFormationProcessor.java` | 仿真 tick 中，候选动作通过 `DqnPolicyService` 评分，并写入经验池训练 |
+
 ## 1. 建模目标
 
 第一阶段不建议让 DQN 直接生成完整编组方案，而是让 DQN 替换当前的启发式候选排序逻辑。
@@ -268,7 +319,7 @@ MovementProcessor
 
 ## 6. 推荐后端模块划分
 
-建议新增以下模块：
+当前已经新增以下模块：
 
 ```text
 algorithm/dqn/DqnFeatureBuilder.java
@@ -276,10 +327,12 @@ algorithm/dqn/DqnActionGenerator.java
 algorithm/dqn/DqnRewardCalculator.java
 algorithm/dqn/DqnPolicyService.java
 algorithm/dqn/DqnReplayBuffer.java
+algorithm/dqn/DqnLinearQModel.java
 algorithm/dqn/DqnTrainingService.java
 algorithm/dqn/model/DqnAction.java
 algorithm/dqn/model/DqnExperience.java
 algorithm/dqn/model/DqnFeatureVector.java
+algorithm/dqn/model/DqnScoredAction.java
 ```
 
 职责说明：
@@ -289,12 +342,14 @@ algorithm/dqn/model/DqnFeatureVector.java
 | `DqnFeatureBuilder` | 将敌方、武器、弹种、保护区转换为模型输入特征 |
 | `DqnActionGenerator` | 复用现有匹配逻辑生成合法候选动作 |
 | `DqnRewardCalculator` | 计算即时奖励 |
-| `DqnPolicyService` | 加载模型并输出候选动作 Q 值 |
+| `DqnPolicyService` | 输出候选动作 Q 值，当前融合启发式冷启动和线性 Q 模型 |
 | `DqnReplayBuffer` | 保存经验回放数据 |
-| `DqnTrainingService` | 负责离线训练或仿真训练 |
+| `DqnLinearQModel` | 当前可训练线性 Q 估计器，后续可替换为神经网络 |
+| `DqnTrainingService` | 负责写入经验、采样 batch、执行 TD 更新 |
 | `DqnAction` | 描述 `weaponId + fireType + enemyId` |
 | `DqnExperience` | 描述 `(s, a, r, s', done)` |
 | `DqnFeatureVector` | 封装模型输入向量 |
+| `DqnScoredAction` | 封装候选动作、特征、启发式分数和 Q 值 |
 
 ## 7. 接入点
 
@@ -375,7 +430,7 @@ maxGroupSize 编组规模约束
 
 ## 10. 训练流程
 
-DQN 标准训练流程：
+DQN 标准训练流程如下。当前版本已经实现 ReplayBuffer、reward 计算、batch 采样和 TD 更新，但 Q 模型暂时是线性模型，不是神经网络：
 
 ```text
 初始化 Q 网络和 Target Q 网络
@@ -392,7 +447,32 @@ for epoch in epochs:
         从 ReplayBuffer 采样 batch
         计算 target = r + gamma * max Q_target(s', a')
         更新 Q 网络
-        定期同步 Target Q 网络
+定期同步 Target Q 网络
+```
+
+当前已实现的在线更新流程：
+
+```text
+1. 生成候选动作 weapon-fire-enemy
+2. 构造 DqnFeatureVector
+3. DqnPolicyService 预测当前 Q 值
+4. DqnRewardCalculator 计算即时 reward
+5. DqnTrainingService 写入 DqnReplayBuffer
+6. 从 ReplayBuffer 采样 batch
+7. 计算 target
+   - done=true 或 nextState=null 时：target = reward
+   - 否则：target = reward + gamma * Q(nextState)
+8. DqnLinearQModel 按误差更新权重
+```
+
+当前线性 Q 更新公式：
+
+```text
+prediction = bias + Σ(weight_i * feature_i)
+error = target - prediction
+weight_i = weight_i + learningRate * error * feature_i
+bias = bias + learningRate * error
+Q = clamp(prediction, 0, 1)
 ```
 
 项目中已有配置类 `DynamicAlgorithmConfigDTO`，可以继续使用：
@@ -428,14 +508,17 @@ planCount
 推荐迭代顺序：
 
 ```text
-1. 抽出候选动作对象 DqnAction
-2. 抽出特征构造器 DqnFeatureBuilder
-3. 将现有启发式分数改造成可记录的训练标签
-4. 实现 DqnPolicyService，先返回启发式分数作为占位
-5. 接入真实 DQN 模型推理
-6. 增加 ReplayBuffer 和 RewardCalculator
-7. 接入仿真训练
-8. 对比启发式策略和 DQN 策略的拦截率、成本、漏防率
+[已完成] 1. 抽出候选动作对象 DqnAction
+[已完成] 2. 抽出特征构造器 DqnFeatureBuilder
+[已完成] 3. 将现有启发式分数改造成可记录的冷启动分数
+[已完成] 4. 实现 DqnPolicyService，输出候选动作 Q 值
+[已完成] 5. 增加 ReplayBuffer 和 RewardCalculator
+[已完成] 6. 增加 DqnLinearQModel，支持在线权重更新
+[已完成] 7. 接入动态方案生成和仿真 tick 流程
+[待完成] 8. 接入真实神经网络 DQN 模型推理
+[待完成] 9. 增加 Target Network 和 epsilon-greedy 探索
+[待完成] 10. 增加模型持久化、离线训练和评估报表
+[待完成] 11. 对比启发式策略、线性 Q 学习策略和 DQN 策略的拦截率、成本、漏防率
 ```
 
 ## 12. 评估指标

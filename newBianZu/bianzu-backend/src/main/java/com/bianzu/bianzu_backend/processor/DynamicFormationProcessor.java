@@ -1,8 +1,15 @@
 package com.bianzu.bianzu_backend.processor;
 
+import com.bianzu.bianzu_backend.algorithm.dqn.DqnFeatureBuilder;
+import com.bianzu.bianzu_backend.algorithm.dqn.DqnPolicyService;
+import com.bianzu.bianzu_backend.algorithm.dqn.DqnTrainingService;
+import com.bianzu.bianzu_backend.algorithm.dqn.model.DqnAction;
+import com.bianzu.bianzu_backend.algorithm.dqn.model.DqnFeatureVector;
+import com.bianzu.bianzu_backend.algorithm.dqn.model.DqnScoredAction;
 import com.bianzu.bianzu_backend.model.*;
 import com.bianzu.bianzu_backend.service.EnemyTypeService;
 import com.bianzu.bianzu_backend.service.FireTypeService;
+import com.bianzu.bianzu_backend.service.WeaponTypeService;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
@@ -27,6 +34,18 @@ public class DynamicFormationProcessor implements SimulationProcessor {
 
     @Autowired
     private EnemyTypeService enemyTypeService;
+
+    @Autowired
+    private WeaponTypeService weaponTypeService;
+
+    @Autowired
+    private DqnFeatureBuilder dqnFeatureBuilder;
+
+    @Autowired
+    private DqnPolicyService dqnPolicyService;
+
+    @Autowired
+    private DqnTrainingService dqnTrainingService;
 
     @Override
     public void process(SimulationContext context) {
@@ -73,7 +92,7 @@ public class DynamicFormationProcessor implements SimulationProcessor {
 
         // 5. 生成武器-目标分配方案（增强版：考虑敌方威胁属性）
         List<WeaponFireAssignment> assignments = generateAssignmentsEnhanced(
-                candidates, paradigm, inZoneStatus, enemyById, fireTypeMap, zoneByWeaponId, safeZones);
+                candidates, availableWeapons, paradigm, inZoneStatus, enemyById, fireTypeMap, zoneByWeaponId, safeZones);
 
         // 6. 更新武器状态并扣减弹药
         applyAssignments(weapons, assignments);
@@ -195,6 +214,7 @@ public class DynamicFormationProcessor implements SimulationProcessor {
      */
     private List<WeaponFireAssignment> generateAssignmentsEnhanced(
             List<WeaponFireAssignment> candidates,
+            List<WeaponNode> availableWeapons,
             FormationParadigm paradigm,
             Map<String, Boolean> inZoneStatus,
             Map<String, EnemyNode> enemyById,
@@ -213,6 +233,16 @@ public class DynamicFormationProcessor implements SimulationProcessor {
                 enemyTypeById.put(enemy.getId(), et);
             }
         }
+        Map<String, WeaponNode> weaponById = safeList(availableWeapons).stream()
+                .collect(Collectors.toMap(WeaponNode::getId, item -> item, (left, right) -> left, LinkedHashMap::new));
+        Map<String, WeaponType> weaponTypeMap = weaponTypeService.getWeaponTypes().stream()
+                .filter(Objects::nonNull)
+                .filter(item -> item.getType() != null)
+                .collect(Collectors.toMap(WeaponType::getType, item -> item, (left, right) -> left, LinkedHashMap::new));
+        int totalAmmo = safeList(availableWeapons).stream()
+                .flatMap(weapon -> safeList(weapon.getAmmoStates()).stream())
+                .mapToInt(ammo -> ammo.getCurrentCount() == null ? 0 : ammo.getCurrentCount())
+                .sum();
 
         // 构建威胁评分列表
         List<ThreatScoredAssignment> scored = new ArrayList<>();
@@ -244,7 +274,34 @@ public class DynamicFormationProcessor implements SimulationProcessor {
                     costScore * 0.15D,
                     0D, 1D);
 
-            scored.add(new ThreatScoredAssignment(candidate, totalScore, threatScore));
+            WeaponNode weapon = weaponById.get(candidate.getWeaponId());
+            WeaponType weaponType = weapon == null ? null : weaponTypeMap.get(weapon.getType());
+            DqnAction action = new DqnAction(
+                    candidate.getWeaponId(),
+                    weapon == null ? null : weapon.getType(),
+                    candidate.getFireType(),
+                    candidate.getEnemyId(),
+                    enemy.getType(),
+                    normalizeDomain(weaponType == null ? null : weaponType.getDeployDomain()),
+                    sourceZone == null ? "UNASSIGNED_ZONE" : sourceZone.getId());
+            DqnFeatureVector featureVector = dqnFeatureBuilder.buildCandidateFeature(
+                    action,
+                    weapon,
+                    weaponType,
+                    enemy,
+                    enemyType,
+                    fireType,
+                    sourceZone,
+                    Boolean.TRUE.equals(inZoneStatus.get(candidate.getEnemyId())),
+                    distanceKm,
+                    distanceKm == null ? 0D : distanceKm * Math.max(defaultDouble(fireType.getAttCost()), 0D),
+                    enemyById.size(),
+                    safeList(availableWeapons).size(),
+                    totalAmmo,
+                    safeList(zones).size());
+            DqnScoredAction scoredAction = dqnPolicyService.score(new DqnScoredAction(action, featureVector, totalScore, null));
+            dqnTrainingService.observeImmediate(scoredAction, false, 0.001D, 32);
+            scored.add(new ThreatScoredAssignment(candidate, scoredAction.getQValue(), threatScore));
         }
 
         // 按威胁等级和综合评分排序
@@ -386,6 +443,29 @@ public class DynamicFormationProcessor implements SimulationProcessor {
 
     private double clamp(double value, double min, double max) {
         return Math.max(min, Math.min(max, value));
+    }
+
+    private String normalizeDomain(String rawDomain) {
+        if (rawDomain == null) {
+            return "UNKNOWN";
+        }
+        String normalized = rawDomain.trim().toLowerCase(Locale.ROOT);
+        if (normalized.isEmpty()) {
+            return "UNKNOWN";
+        }
+        if (normalized.contains("air")) {
+            return "AIR";
+        }
+        if (normalized.contains("ground") || normalized.contains("land")) {
+            return "GROUND";
+        }
+        if (normalized.contains("sea") || normalized.contains("naval")) {
+            return "SEA";
+        }
+        if (normalized.contains("space")) {
+            return "SPACE";
+        }
+        return rawDomain.toUpperCase(Locale.ROOT);
     }
 
     private record ThreatScoredAssignment(WeaponFireAssignment assignment, double score, double threatScore) {

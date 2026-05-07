@@ -1,5 +1,11 @@
 package com.bianzu.bianzu_backend.service;
 
+import com.bianzu.bianzu_backend.algorithm.dqn.DqnFeatureBuilder;
+import com.bianzu.bianzu_backend.algorithm.dqn.DqnPolicyService;
+import com.bianzu.bianzu_backend.algorithm.dqn.DqnTrainingService;
+import com.bianzu.bianzu_backend.algorithm.dqn.model.DqnAction;
+import com.bianzu.bianzu_backend.algorithm.dqn.model.DqnFeatureVector;
+import com.bianzu.bianzu_backend.algorithm.dqn.model.DqnScoredAction;
 import com.bianzu.bianzu_backend.model.EnemyNode;
 import com.bianzu.bianzu_backend.model.EnemyType;
 import com.bianzu.bianzu_backend.model.FireType;
@@ -28,6 +34,15 @@ public class DynamicFormationPlanningService {
 
     @Autowired
     private WeaponTypeService weaponTypeService;
+
+    @Autowired
+    private DqnFeatureBuilder dqnFeatureBuilder;
+
+    @Autowired
+    private DqnPolicyService dqnPolicyService;
+
+    @Autowired
+    private DqnTrainingService dqnTrainingService;
 
     /**
      * 生成动态编组方案
@@ -498,6 +513,25 @@ public class DynamicFormationPlanningService {
                 ? 6 : constraints.getMaxGroupSize();
         double minInterceptionRate = clamp(defaultDouble(constraints.getMinInterceptionRate()), 0D, 1D);
         Set<String> allowedDomains = resolveAllowedDomains(request.getParadigm());
+        double learningRate = request.getConfig() == null || request.getConfig().getLearningRate() == null
+                ? 0.001D : request.getConfig().getLearningRate();
+        int batchSize = request.getConfig() == null || request.getConfig().getBatchSize() == null
+                ? 32 : request.getConfig().getBatchSize();
+        int totalAmmo = availableWeapons.stream()
+                .flatMap(weapon -> safeList(weapon.getAmmoStates()).stream())
+                .mapToInt(ammo -> ammo.getCurrentCount() == null ? 0 : ammo.getCurrentCount())
+                .sum();
+        int validEnemyCount = (int) candidates.values().stream()
+                .flatMap(list -> safeList(list).stream())
+                .filter(Objects::nonNull)
+                .map(EnemyNode::getId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .count();
+        Map<String, EnemyType> enemyTypeMap = safeList(request.getEnemyTypes()).stream()
+                .filter(Objects::nonNull)
+                .filter(item -> item.getType() != null)
+                .collect(Collectors.toMap(EnemyType::getType, item -> item, (left, right) -> left, LinkedHashMap::new));
 
         // 先展开所有可行候选，并为后续排序生成统一得分。
         List<ScoredCandidate> scoredCandidates = new ArrayList<>();
@@ -528,8 +562,34 @@ public class DynamicFormationPlanningService {
                         ? clamp(dispatchCost / 180D, 0D, 0.25D) * clamp(defaultDouble(constraints.getDispatchCostWeight()), 0D, 1D)
                         : 0D;
                 // 当前是工程化启发式评分模型，后续可替换为学习到的价值函数或 Q 值。
-                double score = clamp(interception * 0.56D + normalizedDistance * 0.32D + zoneBonus + ammoFactor - dispatchPenalty, 0D, 1D);
-                scoredCandidates.add(new ScoredCandidate(weapon, enemy, bestFireType, deployDomain, zoneByWeaponId.get(weapon.getId()), distanceKm, dispatchCost, targetInZone, score));
+                double heuristicScore = clamp(interception * 0.56D + normalizedDistance * 0.32D + zoneBonus + ammoFactor - dispatchPenalty, 0D, 1D);
+                ProtectionZone sourceZone = zoneByWeaponId.get(weapon.getId());
+                DqnAction action = new DqnAction(
+                        weapon.getId(),
+                        weapon.getType(),
+                        bestFireType.getType(),
+                        enemy.getId(),
+                        enemy.getType(),
+                        deployDomain,
+                        sourceZone == null ? "UNASSIGNED_ZONE" : sourceZone.getId());
+                DqnFeatureVector featureVector = dqnFeatureBuilder.buildCandidateFeature(
+                        action,
+                        weapon,
+                        weaponType,
+                        enemy,
+                        enemyTypeMap.get(enemy.getType()),
+                        bestFireType,
+                        sourceZone,
+                        targetInZone,
+                        distanceKm,
+                        dispatchCost,
+                        validEnemyCount,
+                        availableWeapons.size(),
+                        totalAmmo,
+                        safeList(request.getZones()).size());
+                DqnScoredAction scoredAction = dqnPolicyService.score(new DqnScoredAction(action, featureVector, heuristicScore, null));
+                dqnTrainingService.observeImmediate(scoredAction, false, learningRate, batchSize);
+                scoredCandidates.add(new ScoredCandidate(weapon, enemy, bestFireType, deployDomain, sourceZone, distanceKm, dispatchCost, targetInZone, scoredAction.getQValue()));
             }
         }
         scoredCandidates.sort(Comparator.comparingDouble(ScoredCandidate::score).reversed());
