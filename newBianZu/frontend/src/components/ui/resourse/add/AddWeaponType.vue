@@ -2,14 +2,14 @@
   <div class="add-weapon-wrap">
     <section class="card">
       <header class="card-head">
-        <h3>添加武器类型</h3>
+        <h3>{{ isEditMode ? '编辑武器类型' : '添加武器类型' }}</h3>
         <p class="subtitle">填写武器类型信息</p>
       </header>
 
       <div class="card-body form-grid">
         <label class="field">
           <span class="label">类型名称</span>
-          <input v-model="form.type" type="text" />
+          <input v-model="form.type" type="text" :disabled="isEditMode" />
         </label>
 
         <label class="field">
@@ -36,7 +36,6 @@
           <input v-model.number="form.channelCount" type="number" min="0" />
         </label>
 
-        <!-- 火力配置列表 -->
         <div v-if="form.function === '载弹' || form.function === '混合'" class="field full">
           <span class="label">火力配置列表</span>
           <div class="fire-list">
@@ -64,24 +63,61 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch ,toRaw} from 'vue';
-import { useResStore } from '@/stores/resource';
+import { computed, ref, toRaw, watch } from 'vue';
 import { resApi } from '@/api/resource';
+import type { WeaponType } from '@/model/weaponType';
+import { useResStore } from '@/stores/resource';
+
+const props = defineProps<{
+  initialValue?: WeaponType | null;
+  mode?: 'add' | 'edit';
+}>();
 
 const store = useResStore();
-
+const isEditMode = computed(() => props.mode === 'edit');
 const message = ref('');
 const error = ref('');
 const loading = ref(false);
 
-const form = ref<any>({
-  type: '',
-  deployDomain: '地',
-  function: '雷达',
-  channelCount: 0,
-  fireTypes: [] as Array<{ fireType: string; quantity: number }> ,
-  description: '这是一个武器类型'
+function defaultForm(): WeaponType {
+  return {
+    type: '',
+    deployDomain: '地',
+    function: '雷达',
+    channelCount: 0,
+    fireTypes: [],
+    description: '',
+  };
+}
+
+const form = ref<WeaponType>(defaultForm());
+
+const missileOptions = computed(() => {
+  return Array.from(store.fireTypeMap.values()).map(item => item.type);
 });
+
+watch(
+  () => props.initialValue,
+  value => {
+    form.value = value
+      ? {
+          ...value,
+          fireTypes: value.fireTypes ? value.fireTypes.map(item => ({ ...item })) : [],
+        }
+      : defaultForm();
+    resetMessage();
+  },
+  { immediate: true },
+);
+
+watch(
+  () => form.value.function,
+  fn => {
+    if (fn !== '载弹' && fn !== '混合') {
+      form.value.fireTypes = [];
+    }
+  },
+);
 
 function resetMessage() {
   message.value = '';
@@ -89,74 +125,55 @@ function resetMessage() {
 }
 
 function addFireType() {
+  form.value.fireTypes = form.value.fireTypes || [];
   form.value.fireTypes.push({ fireType: '', quantity: 1 });
 }
 
 function removeFireType(index: number | string) {
   const i = Number(index);
   if (!Number.isFinite(i)) return;
-  form.value.fireTypes.splice(i, 1);
+  form.value.fireTypes?.splice(i, 1);
 }
 
-// 计算可选的导弹 fireType 列表：优先使用带 isMissile 标记的项，否则返回全部
-const missileOptions = computed(() => {
-  const arr = Array.from((store.fireTypeMap && store.fireTypeMap.values) ? store.fireTypeMap.values() : [] as any);
-  // values() 可能返回 Iterator; convert properly
-  const list = Array.isArray(arr) ? arr : Array.from(arr as Iterable<any>);
-  if (list.length === 0) return [] as string[];
-  return list.map((f: any) => f.type);
-});
-
-// 当装备作用变为非载弹/混合时，自动清空 fireTypes，防止用户填写的配置保留
-watch(() => form.value.function, (fn) => {
-  if (fn !== '载弹' && fn !== '混合') {
-    form.value.fireTypes = [];
-  }
-});
-
 async function submitForm() {
-    resetMessage();
-    // 简单校验
-    if (!form.value.type) {
-        error.value = '请填写类型名称';
-        return false;
+  resetMessage();
+  if (!form.value.type) {
+    error.value = '请填写类型名称';
+    return false;
+  }
+
+  loading.value = true;
+  try {
+    const raw = toRaw(form.value);
+    const payload: WeaponType = {
+      ...raw,
+      fireTypes: (raw.fireTypes || []).map(ft => ({
+        fireType: String(ft.fireType || ''),
+        quantity: Number(ft.quantity || 0),
+      })),
+    };
+    const res = await resApi.addWeaponType(payload);
+    if (res && res.code === 200) {
+      message.value = res.message || (isEditMode.value ? '保存成功' : '添加成功');
+      return true;
     }
-    try {
-        const raw = toRaw(form.value);
-        const payload = {
-        ...raw,
-        fireTypes: (raw.fireTypes || []).map((ft: any) => ({
-            fireType: String(ft.fireType || ''),
-            quantity: Number(ft.quantity || 0)
-        }))
-        };
-        const res = await resApi.addWeaponType(payload);
-        if(res && res.code == 200){
-            message.value = res.message || '武器类型添加成功';
-            resetForm();
-            return true;
-        } else {
-            error.value = res.message || '武器类型添加失败';
-            throw new Error(res.message || '武器类型添加失败');
-        }
-    } catch (err: any) {
-        console.error('添加失败', err);
-        error.value = err?.message || String(err);
-        return false;
-    } finally {
-        loading.value = false;
-    }
+    error.value = res.message || '保存失败';
+    return false;
+  } catch (err: any) {
+    error.value = err?.message || String(err);
+    return false;
+  } finally {
+    loading.value = false;
+  }
 }
 
 function resetForm() {
-  form.value = {
-    type: '',
-    deployDomain: '地',
-    function: '雷达',
-    channelCount: 0,
-    fireTypes: [],
-    description: ''
-  };
+  form.value = props.initialValue
+    ? {
+        ...props.initialValue,
+        fireTypes: props.initialValue.fireTypes ? props.initialValue.fireTypes.map(item => ({ ...item })) : [],
+      }
+    : defaultForm();
   resetMessage();
 }
 

@@ -12,7 +12,7 @@ onMounted(() => {
 // Map 转 Array 才能遍历
 const weaponList = computed(() => Array.from(store.weaponTypeMap.values()));
 
-const emit = defineEmits(['add-weapon']);
+const emit = defineEmits(['add-weapon', 'edit-weapon']);
 function onAddWeapon() {
   console.log('resource/list/WeaponTypes.vue:添加新的武器类型');
   emit('add-weapon');
@@ -20,7 +20,10 @@ function onAddWeapon() {
 
 // 编辑 / 删除 按钮处理（当前仅在控制台输出）
 function onEditWeapon(type: string) {
-  // console.log('编辑武器类型:', weapon?.type ?? weapon);
+  const weapon = store.weaponTypeMap.get(type);
+  if (weapon) {
+    emit('edit-weapon', weapon);
+  }
 }
 function onDeleteWeapon(type: string) {
       // 询问用户是否确认删除

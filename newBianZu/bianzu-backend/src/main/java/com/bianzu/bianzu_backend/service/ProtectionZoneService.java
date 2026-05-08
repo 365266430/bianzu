@@ -174,6 +174,52 @@ public class ProtectionZoneService {
         return true;
     }
 
+    public boolean addWeaponsToZone(String zoneId, List<String> weaponIds) {
+        if (zoneId == null || zoneId.isBlank() || weaponIds == null || weaponIds.isEmpty()) {
+            return false;
+        }
+        List<ProtectionZone> allZones = getAllZones();
+        boolean found = false;
+        for (ProtectionZone zone : allZones) {
+            if (!zoneId.equals(zone.getId())) {
+                continue;
+            }
+            if (zone.getStationedWeaponIds() == null) {
+                zone.setStationedWeaponIds(new ArrayList<>());
+            }
+            for (String weaponId : weaponIds) {
+                if (weaponId != null && !weaponId.isBlank() && !zone.getStationedWeaponIds().contains(weaponId)) {
+                    zone.getStationedWeaponIds().add(weaponId);
+                }
+            }
+            found = true;
+            break;
+        }
+        if (found) {
+            saveAllZones(allZones);
+        }
+        return found;
+    }
+
+    public void removeWeaponFromZones(String weaponId) {
+        if (weaponId == null || weaponId.isBlank()) {
+            return;
+        }
+        List<ProtectionZone> zones = new ArrayList<>(getAllZones());
+        boolean changed = false;
+        for (ProtectionZone zone : zones) {
+            if (zone.getStationedWeaponIds() == null) {
+                continue;
+            }
+            if (zone.getStationedWeaponIds().removeIf(id -> weaponId.equals(id))) {
+                changed = true;
+            }
+        }
+        if (changed) {
+            saveAllZones(zones);
+        }
+    }
+
     public List<ProtectionZone> autoAssignWeaponsToZones() {
         List<ProtectionZone> zones = new ArrayList<>(getAllZones());
         if (zones.isEmpty()) {

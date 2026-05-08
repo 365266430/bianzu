@@ -1,6 +1,7 @@
 import type { FireType } from '@/model/fireType';
 import type { WeaponType } from '@/model/weaponType';
 import type { EnemyType } from '@/model/enemyType';
+import type { WeaponNode } from '@/model/weaponNode';
 import request from '@/utils/request';
 import type { ApiResponse } from '@/model/response';
 
@@ -51,6 +52,32 @@ export const resApi = {
     async addWeaponType(data: WeaponType){
         try{
             const response=await request.post<WeaponType, ApiResponse<WeaponType>>('/weapon/add-type',data);
+            return response;
+        }catch(error){
+            console.error("请求错误:",error);
+            throw error;
+        }
+    },
+
+    async createWeaponNodes(data: {
+        type: string
+        count: number
+        status: number
+        zoneId?: string
+        ammoStates: Array<{ fireUnitType: string; currentCount: number }>
+    }){
+        try{
+            const response=await request.post<typeof data, ApiResponse<{ created: WeaponNode[]; assignedToZone: boolean }>>('/weapon/nodes',data);
+            return response;
+        }catch(error){
+            console.error("请求错误:",error);
+            throw error;
+        }
+    },
+
+    async deleteWeaponNode(weaponId: string){
+        try{
+            const response=await request.delete<any, ApiResponse<WeaponNode[]>>(`/weapon/node/${encodeURIComponent(weaponId)}`);
             return response;
         }catch(error){
             console.error("请求错误:",error);

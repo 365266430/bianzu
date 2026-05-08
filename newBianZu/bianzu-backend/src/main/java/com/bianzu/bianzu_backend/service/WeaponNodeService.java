@@ -9,8 +9,9 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.UUID;
+import java.util.Map;
 
 @Service
 public class WeaponNodeService {
@@ -80,6 +81,19 @@ public class WeaponNodeService {
         return nodes;
     }
 
+    public List<WeaponNode> deleteWeaponNode(String weaponId) {
+        if (weaponId == null || weaponId.isBlank()) {
+            throw new IllegalArgumentException("Weapon id cannot be empty");
+        }
+        List<WeaponNode> nodes = new ArrayList<>(getAllWeapons());
+        boolean removed = nodes.removeIf(node -> weaponId.equals(node.getId()));
+        if (!removed) {
+            throw new IllegalArgumentException("Weapon not found: " + weaponId);
+        }
+        saveAllWeapons(nodes);
+        return nodes;
+    }
+
     public void initWeapons() {
         if (weaponTypeService.getWeaponByType("HQ-9_Launcher") == null) {
             throw new RuntimeException("请先初始化 WeaponUnit 模板库！");
@@ -87,7 +101,9 @@ public class WeaponNodeService {
 
         List<WeaponNode> allNodes = new ArrayList<>();
         for (int i = 1; i <= 2; i++) {
-            allNodes.add(createWeaponInstance("HQ-9_Launcher"));
+            WeaponNode node = createWeaponInstance("HQ-9_Launcher");
+            node.setId(nextWeaponNodeId("HQ-9_Launcher", allNodes));
+            allNodes.add(node);
         }
         saveAllWeapons(allNodes);
     }
@@ -99,7 +115,7 @@ public class WeaponNodeService {
         }
 
         WeaponNode node = new WeaponNode();
-        node.setId(UUID.randomUUID().toString());
+        node.setId(type);
         node.setType(type);
         node.setStatus(0);
 
@@ -111,6 +127,69 @@ public class WeaponNodeService {
         }
         node.setAmmoStates(ammoStates);
         return node;
+    }
+
+    public List<WeaponNode> createWeaponNodes(String type, int count, Integer status, List<WeaponNode.NodeAmmoState> ammoStates) {
+        int initialStatus = status == null ? 0 : status;
+        validateStatus(initialStatus);
+        if (type == null || type.isBlank()) {
+            throw new IllegalArgumentException("Weapon type cannot be empty");
+        }
+        if (count <= 0 || count > 100) {
+            throw new IllegalArgumentException("Weapon node count must be between 1 and 100");
+        }
+
+        List<WeaponNode> nodes = new ArrayList<>(getAllWeapons());
+        List<WeaponNode> created = new ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            WeaponNode node = createWeaponInstance(type);
+            node.setId(nextWeaponNodeId(type, nodes));
+            node.setStatus(initialStatus);
+            if (ammoStates != null && !ammoStates.isEmpty()) {
+                node.setAmmoStates(copyAmmoStates(ammoStates));
+            }
+            nodes.add(node);
+            created.add(node);
+        }
+        saveAllWeapons(nodes);
+        return created;
+    }
+
+    private List<WeaponNode.NodeAmmoState> copyAmmoStates(List<WeaponNode.NodeAmmoState> source) {
+        Map<String, Integer> merged = new LinkedHashMap<>();
+        for (WeaponNode.NodeAmmoState ammoState : source) {
+            if (ammoState == null || ammoState.getFireUnitType() == null || ammoState.getFireUnitType().isBlank()) {
+                continue;
+            }
+            int count = ammoState.getCurrentCount() == null ? 0 : Math.max(ammoState.getCurrentCount(), 0);
+            merged.put(ammoState.getFireUnitType(), count);
+        }
+        List<WeaponNode.NodeAmmoState> copied = new ArrayList<>();
+        for (Map.Entry<String, Integer> entry : merged.entrySet()) {
+            copied.add(new WeaponNode.NodeAmmoState(entry.getKey(), entry.getValue()));
+        }
+        return copied;
+    }
+
+    private String nextWeaponNodeId(String type, List<WeaponNode> existingNodes) {
+        String baseId = type == null || type.isBlank() ? "WeaponNode" : type.trim();
+        if (!containsWeaponId(baseId, existingNodes)) {
+            return baseId;
+        }
+        int sequence = 2;
+        while (containsWeaponId(baseId + "-" + sequence, existingNodes)) {
+            sequence++;
+        }
+        return baseId + "-" + sequence;
+    }
+
+    private boolean containsWeaponId(String id, List<WeaponNode> existingNodes) {
+        for (WeaponNode node : existingNodes) {
+            if (node != null && id.equals(node.getId())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public void clearAllWeapons() {

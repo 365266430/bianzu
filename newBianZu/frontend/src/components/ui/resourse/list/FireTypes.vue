@@ -11,14 +11,17 @@ onMounted(() => {
 // Map 转 Array 以便遍历
 const fireTypeList = computed(() => Array.from(store.fireTypeMap?.values?.() || []));
 
-const emit = defineEmits(['add-firetype']);
+const emit = defineEmits(['add-firetype', 'edit-firetype']);
 function onAddFireType() {
   console.log('resource/list/FireTypes.vue:添加新的火力类型');
   emit('add-firetype');
 }
 
 function onEditFireType(type: any) {
-  // console.log('编辑火力类型:', ft?.type ?? ft);
+  const fireType = store.fireTypeMap.get(String(type));
+  if (fireType) {
+    emit('edit-firetype', fireType);
+  }
 }
 function onDeleteFireType(type: string) {
     // 询问用户是否确认删除

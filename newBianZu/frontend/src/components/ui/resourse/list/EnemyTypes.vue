@@ -14,7 +14,7 @@ const store = useResStore();
 // Map 转 Array 才能遍历
 const enemyList = computed(() => Array.from(store.enemyTypeMap.values()));
 
-const emit = defineEmits(['add-enemy']);
+const emit = defineEmits(['add-enemy', 'edit-enemy']);
 
 function onAddEnemyType() {
   // 占位：点击添加新的敌方类型，具体逻辑后续实现
@@ -24,7 +24,10 @@ function onAddEnemyType() {
 
 // 编辑 / 删除 按钮处理（当前仅在控制台输出）
 function onEditEnemy(type: string) {
-  console.log('编辑敌方类型:', type);
+  const enemy = store.enemyTypeMap.get(type);
+  if (enemy) {
+    emit('edit-enemy', enemy);
+  }
 }
 function onDeleteEnemy(type: string) {
   // 询问用户是否确认删除

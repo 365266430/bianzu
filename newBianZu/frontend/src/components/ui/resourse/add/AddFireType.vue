@@ -9,7 +9,7 @@
       <div class="card-body form-grid">
         <label class="field">
           <span class="label">火力类型名称</span>
-          <input v-model="form.type" type="text" />
+          <input v-model="form.type" type="text" :disabled="isEditMode" />
         </label>
 
         <label class="field">
@@ -60,13 +60,20 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import type { FireType } from '@/model/fireType';
 
 const message = ref('');
 const error = ref('');
 const loading = ref(false);
 import { resApi } from '@/api/resource';
+
+const props = defineProps<{
+  initialValue?: FireType | null;
+  mode?: 'add' | 'edit';
+}>();
+
+const isEditMode = computed(() => props.mode === 'edit');
 
 const form = ref<FireType>({
   type: '',
@@ -79,6 +86,29 @@ const form = ref<FireType>({
   attCost: 0,
   description: ''
 });
+
+function defaultForm(): FireType {
+  return {
+    type: '',
+    cost: 0,
+    interception: 0,
+    maxRange: 0,
+    minRange: 0,
+    maxAlt: 0,
+    minAlt: 0,
+    attCost: 0,
+    description: ''
+  };
+}
+
+watch(
+  () => props.initialValue,
+  (value) => {
+    form.value = value ? { ...value } : defaultForm();
+    resetMessage();
+  },
+  { immediate: true }
+);
 
 function resetMessage() {
   message.value = '';
@@ -97,12 +127,11 @@ async function submitForm() {
     const payload = { ...form.value } as FireType;
     const res = await resApi.addFireType(payload);
     if(res && res.code == 200){
-      resetForm();
-      message.value = res.message || '火力类型添加成功';
+      message.value = res.message || (isEditMode.value ? '保存成功' : '添加成功');
       return true;
     } else {
-        error.value = res.message || '火力类型添加失败';
-        throw new Error(res.message || '火力类型添加失败');
+        error.value = res.message || '保存失败';
+        throw new Error(res.message || '保存失败');
     }
   } catch (err: any) {
     console.error('添加失败', err);
@@ -114,17 +143,7 @@ async function submitForm() {
 }
 
 function resetForm() {
-  form.value = {
-    type: '',
-    cost: 0,
-    interception: 0,
-    maxRange: 0,
-    minRange: 0,
-    maxAlt: 0,
-    minAlt: 0,
-    attCost: 0,
-    description: ''
-  };
+  form.value = props.initialValue ? { ...props.initialValue } : defaultForm();
   resetMessage();
 }
 // 将方法暴露给父组件调用

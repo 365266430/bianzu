@@ -9,7 +9,7 @@
       <form class="card-body form-grid">
         <label class="field">
           <span class="label">类型名称</span>
-          <input v-model="form.type" type="text" required />
+          <input v-model="form.type" type="text" required :disabled="isEditMode" />
         </label>
 
         <label class="field">
@@ -64,7 +64,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import type { EnemyType } from '@/model/enemyType';
 import { resApi } from '@/api/resource';
 import { useResStore } from '@/stores/resource';
@@ -75,6 +75,13 @@ const message = ref('');
 const error = ref('');
 
 const store = useResStore();
+
+const props = defineProps<{
+  initialValue?: EnemyType | null;
+  mode?: 'add' | 'edit';
+}>();
+
+const isEditMode = computed(() => props.mode === 'edit');
 
 const form = ref<EnemyType>({
   type: '',
@@ -87,6 +94,29 @@ const form = ref<EnemyType>({
   damageCapability: 0,
   description: '这是一个敌方类型'
 });
+
+function defaultForm(): EnemyType {
+  return {
+    type: '',
+    category: ENEMY_CATEGORY_OPTIONS[0]?.value || '',
+    value: 0,
+    maxSpeed: 0,
+    typicalAltitude: 0,
+    rcs: 0,
+    maxAttackRange: 0,
+    damageCapability: 0,
+    description: ''
+  };
+}
+
+watch(
+  () => props.initialValue,
+  (value) => {
+    form.value = value ? { ...value } : defaultForm();
+    resetMessage();
+  },
+  { immediate: true }
+);
 
 function resetMessage() {
   message.value = '';
@@ -105,12 +135,11 @@ async function submitForm() {
     const payload = { ...form.value } as EnemyType;
     const res = await resApi.addEnemyType(payload);
     if(res && res.code == 200){
-      resetForm();
-      message.value = res.message || '敌方类型添加成功';
+      message.value = res.message || (isEditMode.value ? '保存成功' : '添加成功');
       return true;
     } else {
-        error.value = res.message || '敌方类型添加失败';
-        throw new Error(res.message || '敌方类型添加失败');
+        error.value = res.message || '保存失败';
+        throw new Error(res.message || '保存失败');
     }
   } catch (err: any) {
     console.error('添加失败', err);
@@ -122,17 +151,7 @@ async function submitForm() {
 }
 
 function resetForm() {
-  form.value = {
-    type: '',
-    category: ENEMY_CATEGORY_OPTIONS[0]?.value || '',
-    value: 0,
-    maxSpeed: 0,
-    typicalAltitude: 0,
-    rcs: 0,
-    maxAttackRange: 0,
-    damageCapability: 0,
-    description: '这是一个敌方类型'
-  };
+  form.value = props.initialValue ? { ...props.initialValue } : defaultForm();
   resetMessage();
 }
 
