@@ -100,6 +100,8 @@ public class SimulationEngineService {
         // 2. 推 WebSocket
         WebSocketMessage<List<EnemyNode>> msg = WebSocketMessage.of("ENEMY_UPDATE", enemies);
         simulationHandler.pushToFrontend(JSON.toJSONString(msg));
+        WebSocketMessage<List<ProtectionZone>> zoneMsg = WebSocketMessage.of("ZONE_UPDATE", zones);
+        simulationHandler.pushToFrontend(JSON.toJSONString(zoneMsg));
         WebSocketMessage<List<WeaponNode>> weaponMsg = WebSocketMessage.of("WEAPON_UPDATE", weapons);
         simulationHandler.pushToFrontend(JSON.toJSONString(weaponMsg));
     }

@@ -2,6 +2,7 @@ package com.bianzu.bianzu_backend.processor;
 
 import com.bianzu.bianzu_backend.algorithm.dqn.DqnFeatureBuilder;
 import com.bianzu.bianzu_backend.algorithm.dqn.DqnPolicyService;
+import com.bianzu.bianzu_backend.algorithm.dqn.DqnRuntimeConfigService;
 import com.bianzu.bianzu_backend.algorithm.dqn.DqnTrainingService;
 import com.bianzu.bianzu_backend.algorithm.dqn.model.DqnAction;
 import com.bianzu.bianzu_backend.algorithm.dqn.model.DqnFeatureVector;
@@ -47,6 +48,9 @@ public class DynamicFormationProcessor implements SimulationProcessor {
     @Autowired
     private DqnTrainingService dqnTrainingService;
 
+    @Autowired
+    private DqnRuntimeConfigService dqnRuntimeConfigService;
+
     @Override
     public void process(SimulationContext context) {
         log.debug("动态编组处理 | step: {} | 敌方: {} | 武器: {} | 范式: {}",
@@ -79,12 +83,17 @@ public class DynamicFormationProcessor implements SimulationProcessor {
                 .toList();
 
         if (availableWeapons.isEmpty() || validEnemies.isEmpty()) {
+            dqnTrainingService.finishEpisode(0.001D, 32, 10);
             log.debug("无可用武器或有效目标，跳过编组");
             return;
         }
 
         // 3. 弹药自动匹配：遍历武器的所有弹药，选出射程和射高匹配且弹药充足的目标组合
-        List<WeaponFireAssignment> candidates = matchWeaponFireEnemy(availableWeapons, validEnemies, fireTypeMap, zoneByWeaponId);
+        List<WeaponFireAssignment> candidates = matchWeaponFireEnemy(availableWeapons, validEnemies, fireTypeMap, safeZones);
+        if (candidates.isEmpty()) {
+            dqnTrainingService.finishEpisode(0.001D, 32, 10);
+            return;
+        }
 
         // 4. 敌我位置关系分析
         Map<String, Boolean> inZoneStatus = analyzeInZoneStatus(validEnemies, safeZones);
@@ -96,7 +105,7 @@ public class DynamicFormationProcessor implements SimulationProcessor {
                 candidates, availableWeapons, paradigm, inZoneStatus, enemyById, fireTypeMap, zoneByWeaponId, safeZones);
 
         // 6. 更新武器状态并扣减弹药
-        applyAssignments(weapons, assignments);
+        applyAssignments(weapons, safeZones, assignments);
     }
 
     private void releaseAssignedWeapons(List<WeaponNode> weapons) {
@@ -115,25 +124,28 @@ public class DynamicFormationProcessor implements SimulationProcessor {
             List<WeaponNode> weapons,
             List<EnemyNode> enemies,
             Map<String, FireType> fireTypeMap,
-            Map<String, ProtectionZone> zoneByWeaponId) {
+            List<ProtectionZone> zones) {
         List<WeaponFireAssignment> candidates = new ArrayList<>();
 
         for (WeaponNode weapon : weapons) {
             if (weapon.getAmmoStates() == null) continue;
 
             for (EnemyNode enemy : enemies) {
+                EnemyType enemyType = enemyTypeService.getEnemyType(enemy.getType());
+                ProtectionZone threatenedZone = resolveThreatenedZone(enemy, enemyType, zones);
                 for (WeaponNode.NodeAmmoState ammo : weapon.getAmmoStates()) {
                     // 弹药不足跳过
                     if (ammo.getCurrentCount() == null || ammo.getCurrentCount() <= 0) continue;
 
                     // 检查射程和射高
-                    if (!isInRange(weapon, enemy, ammo.getFireUnitType(), fireTypeMap, zoneByWeaponId)) continue;
+                    if (!isInRange(enemy, ammo.getFireUnitType(), fireTypeMap, threatenedZone)) continue;
                     if (!isInAltitude(enemy, ammo.getFireUnitType(), fireTypeMap)) continue;
 
                     // 自动匹配成功：武器用该弹药打目标
                     candidates.add(new WeaponFireAssignment(
                             weapon.getId(),
                             enemy.getId(),
+                            threatenedZone == null ? null : threatenedZone.getId(),
                             ammo.getFireUnitType()
                     ));
                 }
@@ -145,11 +157,10 @@ public class DynamicFormationProcessor implements SimulationProcessor {
     /**
      * 检查目标是否在武器射程内
      */
-    private boolean isInRange(WeaponNode weapon,
-                              EnemyNode enemy,
+    private boolean isInRange(EnemyNode enemy,
                               String fireType,
                               Map<String, FireType> fireTypeMap,
-                              Map<String, ProtectionZone> zoneByWeaponId) {
+                              ProtectionZone sourceZone) {
         FireType fireTypeInfo = fireTypeMap.get(fireType);
         if (fireTypeInfo == null) {
             return false;
@@ -159,7 +170,7 @@ public class DynamicFormationProcessor implements SimulationProcessor {
             return true;
         }
         double minRangeKm = Math.max(defaultDouble(fireTypeInfo.getMinRange()) / 1000D, 0D);
-        Double distanceKm = computeDistanceKm(zoneByWeaponId.get(weapon.getId()), enemy);
+        Double distanceKm = computeDistanceKm(sourceZone, enemy);
         return distanceKm == null || (distanceKm >= minRangeKm && distanceKm <= maxRangeKm);
     }
 
@@ -263,7 +274,10 @@ public class DynamicFormationProcessor implements SimulationProcessor {
             if (enemy == null) continue;
 
             EnemyType enemyType = enemyTypeById.get(candidate.getEnemyId());
-            ProtectionZone sourceZone = zoneByWeaponId.get(candidate.getWeaponId());
+            ProtectionZone sourceZone = resolveZoneById(candidate.getSourceZoneId(), zones);
+            if (sourceZone == null) {
+                sourceZone = zoneByWeaponId.get(candidate.getWeaponId());
+            }
 
             // 计算各项评分因子
             double threatScore = computeThreatScore(candidate.getEnemyId(), enemy, enemyType, inZoneStatus, zones);
@@ -315,19 +329,22 @@ public class DynamicFormationProcessor implements SimulationProcessor {
         // 按威胁等级和综合评分排序
         List<DqnScoredAction> rankedActions = dqnPolicyService.scoreAll(
                 pendingCandidates.stream().map(PendingThreatCandidate::scoredAction).toList(),
-                0.1D);
+                dqnRuntimeConfigService.effectiveEpsilon(0.1D));
         Map<DqnScoredAction, PendingThreatCandidate> candidateByAction = new IdentityHashMap<>();
         for (PendingThreatCandidate pendingCandidate : pendingCandidates) {
             candidateByAction.put(pendingCandidate.scoredAction(), pendingCandidate);
         }
         List<ThreatScoredAssignment> scored = new ArrayList<>();
+        boolean trainingEnabled = dqnRuntimeConfigService.isTrainingEnabled();
         boolean episodeStepObserved = false;
         for (DqnScoredAction rankedAction : rankedActions) {
-            if (!episodeStepObserved) {
-                dqnTrainingService.observeEpisodeStep(rankedAction, false, 0.001D, 32, 0.95D, 10);
-                episodeStepObserved = true;
-            } else {
-                dqnTrainingService.observeImmediate(rankedAction, false, 0.001D, 32, 10);
+            if (trainingEnabled) {
+                if (!episodeStepObserved) {
+                    dqnTrainingService.observeEpisodeStep(rankedAction, false, 0.001D, 32, 0.95D, 10);
+                    episodeStepObserved = true;
+                } else {
+                    dqnTrainingService.observeImmediate(rankedAction, false, 0.001D, 32, 10);
+                }
             }
             PendingThreatCandidate pendingCandidate = candidateByAction.get(rankedAction);
             if (pendingCandidate != null) {
@@ -405,7 +422,8 @@ public class DynamicFormationProcessor implements SimulationProcessor {
         return threatScore > 0.5D;
     }
 
-        private void applyAssignments(List<WeaponNode> weapons, List<WeaponFireAssignment> assignments) {
+        private void applyAssignments(List<WeaponNode> weapons, List<ProtectionZone> zones, List<WeaponFireAssignment> assignments) {
+        syncStationedWeaponsByAssignments(zones, assignments);
         // 按武器分组
         Map<String, List<WeaponFireAssignment>> byWeapon = assignments.stream()
                 .collect(Collectors.groupingBy(WeaponFireAssignment::getWeaponId));
@@ -445,6 +463,69 @@ public class DynamicFormationProcessor implements SimulationProcessor {
             }
         }
         return zoneByWeaponId;
+    }
+
+    private ProtectionZone resolveThreatenedZone(EnemyNode enemy, EnemyType enemyType, List<ProtectionZone> zones) {
+        ProtectionZone bestZone = null;
+        double bestScore = -1D;
+        double attackRangeKm = Math.max(defaultDouble(enemyType == null ? null : enemyType.getMaxAttackRange()) / 1000D, 0D);
+        for (ProtectionZone zone : safeList(zones)) {
+            Double distanceKm = computeDistanceKm(zone, enemy);
+            if (distanceKm == null) {
+                continue;
+            }
+            double radiusKm = Math.max(defaultDouble(zone.getSize()) / 1000D, 0D);
+            boolean inZone = radiusKm > 0D && distanceKm <= radiusKm;
+            boolean inAttackRange = attackRangeKm <= 0D || distanceKm <= attackRangeKm;
+            if (!inZone && !inAttackRange) {
+                continue;
+            }
+            double headingScore = computeHeadingScore(enemy, zone);
+            double distanceScore = inZone ? 1D : clamp(1D - distanceKm / Math.max(attackRangeKm, 1D), 0D, 1D);
+            double valueScore = clamp(defaultDouble(zone.getValue()) / 3D, 0D, 1D);
+            double score = (inZone ? 1D : 0D) + distanceScore * 0.45D + headingScore * 0.35D + valueScore * 0.2D;
+            if (score > bestScore) {
+                bestScore = score;
+                bestZone = zone;
+            }
+        }
+        return bestZone;
+    }
+
+    private ProtectionZone resolveZoneById(String zoneId, List<ProtectionZone> zones) {
+        if (zoneId == null || zoneId.isBlank()) {
+            return null;
+        }
+        for (ProtectionZone zone : safeList(zones)) {
+            if (zoneId.equals(zone.getId())) {
+                return zone;
+            }
+        }
+        return null;
+    }
+
+    private double computeHeadingScore(EnemyNode enemy, ProtectionZone zone) {
+        if (enemy == null || zone == null || enemy.getHeading() == null
+                || enemy.getLatitude() == null || enemy.getLongitude() == null
+                || zone.getLocation() == null || zone.getLocation().size() < 2) {
+            return 0.5D;
+        }
+        double bearing = computeBearingDegrees(
+                enemy.getLatitude(),
+                enemy.getLongitude(),
+                zone.getLocation().get(1),
+                zone.getLocation().get(0));
+        double diff = Math.abs(((enemy.getHeading() - bearing + 540D) % 360D) - 180D);
+        return clamp(1D - diff / 180D, 0D, 1D);
+    }
+
+    private double computeBearingDegrees(double fromLat, double fromLon, double toLat, double toLon) {
+        double lat1 = Math.toRadians(fromLat);
+        double lat2 = Math.toRadians(toLat);
+        double deltaLon = Math.toRadians(toLon - fromLon);
+        double y = Math.sin(deltaLon) * Math.cos(lat2);
+        double x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(deltaLon);
+        return (Math.toDegrees(Math.atan2(y, x)) + 360D) % 360D;
     }
 
     private Double computeDistanceKm(ProtectionZone zone, EnemyNode enemy) {
@@ -508,6 +589,25 @@ public class DynamicFormationProcessor implements SimulationProcessor {
             double threatScore) {
     }
 
+    private void syncStationedWeaponsByAssignments(List<ProtectionZone> zones, List<WeaponFireAssignment> assignments) {
+        if (zones == null || zones.isEmpty() || assignments == null || assignments.isEmpty()) {
+            return;
+        }
+        Map<String, ProtectionZone> zoneById = zones.stream()
+                .filter(Objects::nonNull)
+                .filter(zone -> zone.getId() != null)
+                .collect(Collectors.toMap(ProtectionZone::getId, item -> item, (left, right) -> left, LinkedHashMap::new));
+        for (ProtectionZone zone : zones) {
+            zone.setStationedWeaponIds(new ArrayList<>());
+        }
+        for (WeaponFireAssignment assignment : assignments) {
+            ProtectionZone zone = zoneById.get(assignment.getSourceZoneId());
+            if (zone != null) {
+                zone.getStationedWeaponIds().add(assignment.getWeaponId());
+            }
+        }
+    }
+
     /**
      * 武器-弹药-目标分配记录
      * 记录某个武器用某种弹药打某个目标
@@ -517,6 +617,7 @@ public class DynamicFormationProcessor implements SimulationProcessor {
     private static class WeaponFireAssignment {
         private String weaponId;
         private String enemyId;
+        private String sourceZoneId;
         private String fireType; // 自动匹配的弹药类型
     }
 }

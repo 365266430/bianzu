@@ -208,8 +208,46 @@ public class ProtectionZoneService {
             if (weapon == null || weapon.getId() == null || weapon.getId().isBlank()) {
                 continue;
             }
-            zones.get(zoneIndex % zones.size()).getStationedWeaponIds().add(weapon.getId());
-            zoneIndex++;
+            int assignedIndex = resolveNearestZoneIndex(weapon, zones);
+            if (assignedIndex < 0) {
+                assignedIndex = zoneIndex % zones.size();
+                zoneIndex++;
+            }
+            zones.get(assignedIndex).getStationedWeaponIds().add(weapon.getId());
+        }
+    }
+
+    private int resolveNearestZoneIndex(WeaponNode weapon, List<ProtectionZone> zones) {
+        Double longitude = readDoubleProperty(weapon, "getLongitude");
+        Double latitude = readDoubleProperty(weapon, "getLatitude");
+        if (longitude == null || latitude == null) {
+            return -1;
+        }
+
+        int bestIndex = -1;
+        double bestDistance = Double.MAX_VALUE;
+        for (int i = 0; i < zones.size(); i++) {
+            ProtectionZone zone = zones.get(i);
+            if (zone.getLocation() == null || zone.getLocation().size() < 2) {
+                continue;
+            }
+            double distance = Math.hypot(
+                    longitude - zone.getLocation().get(0),
+                    latitude - zone.getLocation().get(1));
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                bestIndex = i;
+            }
+        }
+        return bestIndex;
+    }
+
+    private Double readDoubleProperty(Object target, String getterName) {
+        try {
+            Object value = target.getClass().getMethod(getterName).invoke(target);
+            return value instanceof Number number ? number.doubleValue() : null;
+        } catch (Exception ignored) {
+            return null;
         }
     }
 

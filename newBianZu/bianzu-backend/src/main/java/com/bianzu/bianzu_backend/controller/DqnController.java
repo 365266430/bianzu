@@ -2,6 +2,8 @@ package com.bianzu.bianzu_backend.controller;
 
 import com.bianzu.bianzu_backend.algorithm.dqn.DqnTrainingService;
 import com.bianzu.bianzu_backend.algorithm.dqn.DqnModelPersistenceService;
+import com.bianzu.bianzu_backend.algorithm.dqn.DqnRuntimeConfigService;
+import com.bianzu.bianzu_backend.algorithm.dqn.DqnTrainingLogService;
 import com.bianzu.bianzu_backend.common.Result;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -22,6 +24,12 @@ public class DqnController {
     @Autowired
     private DqnModelPersistenceService dqnModelPersistenceService;
 
+    @Autowired
+    private DqnRuntimeConfigService dqnRuntimeConfigService;
+
+    @Autowired
+    private DqnTrainingLogService dqnTrainingLogService;
+
     @PostMapping("/reset")
     public Result<Map<String, Object>> reset(@RequestParam(defaultValue = "true") boolean deleteSavedModel) {
         dqnTrainingService.resetTrainingState(deleteSavedModel);
@@ -36,6 +44,31 @@ public class DqnController {
     public Result<Map<String, Object>> status() {
         return Result.success(Map.of(
                 "training", dqnTrainingService.trainingStatus(),
+                "modelFile", dqnModelPersistenceService.modelFileStatus(),
+                "runtime", dqnRuntimeConfigService.status(),
+                "trainingLog", dqnTrainingLogService.status()
+        ));
+    }
+
+    @PostMapping("/mode")
+    public Result<Map<String, Object>> setMode(@RequestParam(defaultValue = "TRAIN") String mode) {
+        return Result.success(dqnRuntimeConfigService.setMode(mode));
+    }
+
+    @PostMapping("/save")
+    public Result<Map<String, Object>> saveModel() {
+        dqnModelPersistenceService.saveModel();
+        return Result.success(Map.of(
+                "saved", true,
+                "modelFile", dqnModelPersistenceService.modelFileStatus()
+        ));
+    }
+
+    @PostMapping("/load")
+    public Result<Map<String, Object>> loadModel() {
+        boolean loaded = dqnModelPersistenceService.loadModel();
+        return Result.success(Map.of(
+                "loaded", loaded,
                 "modelFile", dqnModelPersistenceService.modelFileStatus()
         ));
     }

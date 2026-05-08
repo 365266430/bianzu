@@ -32,6 +32,18 @@ export const formationApi = {
     return await request.get<any, ApiResponse<Record<string, any>>>('/dqn/status')
   },
 
+  async setDqnMode(mode: 'TRAIN' | 'INFER') {
+    return await request.post<never, ApiResponse<Record<string, any>>>(`/dqn/mode?mode=${mode}`)
+  },
+
+  async saveDqnModel() {
+    return await request.post<never, ApiResponse<Record<string, any>>>('/dqn/save')
+  },
+
+  async loadDqnModel() {
+    return await request.post<never, ApiResponse<Record<string, any>>>('/dqn/load')
+  },
+
   async getParadigms() {
     return await request.get<any, ApiResponse<string[]>>('/formation/paradigms')
   },

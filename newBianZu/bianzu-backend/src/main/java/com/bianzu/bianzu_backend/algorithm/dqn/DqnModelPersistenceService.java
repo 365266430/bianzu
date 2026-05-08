@@ -21,6 +21,10 @@ public class DqnModelPersistenceService {
     @Autowired
     private DqnNeuralQModel qModel;
 
+    private boolean lastLoadSuccess = false;
+    private String lastLoadMessage = "not_loaded";
+    private String lastLoadAt = "";
+
     @PostConstruct
     public void loadOnStartup() {
         loadModel();
@@ -38,6 +42,9 @@ public class DqnModelPersistenceService {
 
     public synchronized boolean loadModel() {
         if (!Files.exists(MODEL_PATH)) {
+            lastLoadSuccess = false;
+            lastLoadMessage = "model_file_not_found";
+            lastLoadAt = Instant.now().toString();
             return false;
         }
         try {
@@ -47,8 +54,14 @@ public class DqnModelPersistenceService {
             if (restored) {
                 System.out.println("DQN model loaded: " + MODEL_PATH.toAbsolutePath());
             }
+            lastLoadSuccess = restored;
+            lastLoadMessage = restored ? "loaded" : "restore_rejected";
+            lastLoadAt = Instant.now().toString();
             return restored;
         } catch (Exception e) {
+            lastLoadSuccess = false;
+            lastLoadMessage = e.getMessage();
+            lastLoadAt = Instant.now().toString();
             System.err.println("Load DQN model failed: " + e.getMessage());
             return false;
         }
@@ -71,6 +84,9 @@ public class DqnModelPersistenceService {
                     "exists", exists,
                     "sizeBytes", exists ? Files.size(MODEL_PATH) : 0L,
                     "lastModified", exists ? Files.getLastModifiedTime(MODEL_PATH).toInstant().toString() : "",
+                    "loadedOnStartup", lastLoadSuccess,
+                    "lastLoadMessage", lastLoadMessage,
+                    "lastLoadAt", lastLoadAt,
                     "checkedAt", Instant.now().toString()
             );
         } catch (IOException e) {

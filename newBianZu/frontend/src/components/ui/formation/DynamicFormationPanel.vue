@@ -26,6 +26,7 @@ const zoneAssignLoading = ref(false)
 const error = ref('')
 const notice = ref('')
 const dqnStatus = ref<Record<string, any> | null>(null)
+const dqnMode = ref<'TRAIN' | 'INFER'>('TRAIN')
 const activeTab = ref<'request' | 'result'>('request')
 const result = ref<DynamicFormationResult | null>(null)
 
@@ -194,7 +195,7 @@ function domainLabel(value: string) {
 function weaponStatusLabel(status: number) {
   if (status === 0) return '待命'
   if (status === 1) return '分配中'
-  if (status === 2) return '被调度分配'
+  if (status === 2) return '交战中'
   return `Unknown(${status})`
 }
 
@@ -396,12 +397,73 @@ async function loadDqnStatus() {
       return
     }
     dqnStatus.value = response.data ?? null
+    dqnMode.value = dqnStatus.value?.runtime?.mode === 'INFER' ? 'INFER' : 'TRAIN'
     const replaySize = dqnStatus.value?.training?.replaySize ?? 0
     const trainStep = dqnStatus.value?.training?.trainStep ?? 0
     const modelExists = dqnStatus.value?.modelFile?.exists ? '已保存' : '未保存'
     notice.value = `DQN 状态：经验 ${replaySize}，训练步 ${trainStep}，模型${modelExists}。`
   } catch (requestError: any) {
     error.value = requestError?.message || 'DQN 状态读取失败'
+  } finally {
+    resetLoading.value = false
+  }
+}
+
+async function setDqnMode(mode: 'TRAIN' | 'INFER') {
+  error.value = ''
+  notice.value = ''
+  resetLoading.value = true
+  try {
+    const response = await formationApi.setDqnMode(mode)
+    if (response?.code !== 200 || !response.data) {
+      error.value = response?.message || 'DQN 模式切换失败'
+      return
+    }
+    dqnMode.value = response.data.mode === 'INFER' ? 'INFER' : 'TRAIN'
+    notice.value = dqnMode.value === 'TRAIN'
+      ? 'DQN 已切换为训练模式：启用探索和经验写入。'
+      : 'DQN 已切换为推理模式：epsilon=0，不再写入训练经验。'
+  } catch (requestError: any) {
+    error.value = requestError?.message || 'DQN 模式切换失败'
+  } finally {
+    resetLoading.value = false
+  }
+}
+
+async function saveDqnModel() {
+  error.value = ''
+  notice.value = ''
+  resetLoading.value = true
+  try {
+    const response = await formationApi.saveDqnModel()
+    if (response?.code !== 200 || !response.data) {
+      error.value = response?.message || 'DQN 模型保存失败'
+      return
+    }
+    dqnStatus.value = response.data
+    notice.value = 'DQN 模型已保存。'
+  } catch (requestError: any) {
+    error.value = requestError?.message || 'DQN 模型保存失败'
+  } finally {
+    resetLoading.value = false
+  }
+}
+
+async function loadDqnModel() {
+  error.value = ''
+  notice.value = ''
+  resetLoading.value = true
+  try {
+    const response = await formationApi.loadDqnModel()
+    if (response?.code !== 200 || !response.data) {
+      error.value = response?.message || 'DQN 模型加载失败'
+      return
+    }
+    const loaded = Boolean(response.data.loaded)
+    dqnStatus.value = response.data
+    notice.value = loaded ? 'DQN 模型已加载。' : '未找到可加载的 DQN 模型文件。'
+  } catch (requestError: any) {
+    error.value = requestError?.message || 'DQN 模型加载失败'
   } finally {
     resetLoading.value = false
   }
@@ -595,6 +657,20 @@ onUnmounted(() => {
           </button>
         </div>
         <div class="primary-actions secondary-actions">
+          <button class="status-btn" type="button" :class="{ active: dqnMode === 'TRAIN' }" :disabled="loading || resetLoading" @click="setDqnMode('TRAIN')">
+            训练模式
+          </button>
+          <button class="status-btn" type="button" :class="{ active: dqnMode === 'INFER' }" :disabled="loading || resetLoading" @click="setDqnMode('INFER')">
+            推理模式
+          </button>
+          <button class="status-btn" type="button" :disabled="loading || resetLoading" @click="saveDqnModel">
+            保存模型
+          </button>
+        </div>
+        <div class="primary-actions secondary-actions">
+          <button class="status-btn" type="button" :disabled="loading || resetLoading" @click="loadDqnModel">
+            加载模型
+          </button>
           <button class="status-btn" type="button" :disabled="loading || weaponStatusLoading" @click="updateAllWeaponStatus(0)">
             全部待命
           </button>
@@ -1026,6 +1102,12 @@ onUnmounted(() => {
 
 .status-btn {
   min-width: 72px;
+}
+
+.status-btn.active {
+  color: #fff;
+  background: linear-gradient(135deg, #14547a, #168da8);
+  border-color: transparent;
 }
 
 .secondary-actions {

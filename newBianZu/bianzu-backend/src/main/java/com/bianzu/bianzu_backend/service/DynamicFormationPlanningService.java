@@ -2,6 +2,7 @@ package com.bianzu.bianzu_backend.service;
 
 import com.bianzu.bianzu_backend.algorithm.dqn.DqnFeatureBuilder;
 import com.bianzu.bianzu_backend.algorithm.dqn.DqnPolicyService;
+import com.bianzu.bianzu_backend.algorithm.dqn.DqnRuntimeConfigService;
 import com.bianzu.bianzu_backend.algorithm.dqn.model.DqnAction;
 import com.bianzu.bianzu_backend.algorithm.dqn.model.DqnFeatureVector;
 import com.bianzu.bianzu_backend.algorithm.dqn.model.DqnScoredAction;
@@ -39,6 +40,9 @@ public class DynamicFormationPlanningService {
 
     @Autowired
     private DqnPolicyService dqnPolicyService;
+
+    @Autowired
+    private DqnRuntimeConfigService dqnRuntimeConfigService;
 
     /**
      * 生成动态编组方案
@@ -509,8 +513,9 @@ public class DynamicFormationPlanningService {
                 ? 6 : constraints.getMaxGroupSize();
         double minInterceptionRate = clamp(defaultDouble(constraints.getMinInterceptionRate()), 0D, 1D);
         Set<String> allowedDomains = resolveAllowedDomains(request.getParadigm());
-        double epsilon = request.getConfig() == null || request.getConfig().getEpsilon() == null
+        double configuredEpsilon = request.getConfig() == null || request.getConfig().getEpsilon() == null
                 ? 0.1D : request.getConfig().getEpsilon();
+        double epsilon = dqnRuntimeConfigService.effectiveEpsilon(configuredEpsilon);
         int totalAmmo = availableWeapons.stream()
                 .flatMap(weapon -> safeList(weapon.getAmmoStates()).stream())
                 .mapToInt(ammo -> ammo.getCurrentCount() == null ? 0 : ammo.getCurrentCount())

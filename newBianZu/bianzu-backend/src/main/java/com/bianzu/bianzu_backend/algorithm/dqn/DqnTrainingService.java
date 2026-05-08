@@ -23,6 +23,9 @@ public class DqnTrainingService {
     @Autowired
     private DqnModelPersistenceService modelPersistenceService;
 
+    @Autowired
+    private DqnTrainingLogService trainingLogService;
+
     private int trainStep = 0;
     private DqnScoredAction lastEpisodeAction;
     private Map<String, Object> lastProcessorStatus = Map.of("reason", "not_started");
@@ -43,6 +46,11 @@ public class DqnTrainingService {
                 null,
                 true);
         replayBuffer.add(experience);
+        trainingLogService.append("experience", Map.of(
+                "terminal", true,
+                "reward", reward,
+                "action", scoredAction.getAction()
+        ));
         trainBatch(Math.max(batchSize, 1), learningRate, 0.95D, targetUpdateFreq);
     }
 
@@ -65,6 +73,12 @@ public class DqnTrainingService {
                     currentAction.getFeatureVector(),
                     false);
             replayBuffer.add(experience);
+            trainingLogService.append("experience", Map.of(
+                    "terminal", false,
+                    "reward", reward,
+                    "action", lastEpisodeAction.getAction(),
+                    "nextAction", currentAction.getAction()
+            ));
             trainBatch(Math.max(batchSize, 1), learningRate, gamma, targetUpdateFreq);
         }
         lastEpisodeAction = currentAction;
@@ -76,6 +90,7 @@ public class DqnTrainingService {
         }
         observeImmediate(lastEpisodeAction, false, learningRate, batchSize, targetUpdateFreq);
         lastEpisodeAction = null;
+        trainingLogService.append("episode_finished", Map.of("reason", "explicit_finish"));
     }
 
     public double trainBatch(int batchSize, double learningRate, double gamma) {
@@ -101,6 +116,7 @@ public class DqnTrainingService {
             if (trainStep % syncFreq == 0) {
                 qModel.syncTargetNetwork();
                 modelPersistenceService.saveModel();
+                trainingLogService.append("model_saved", Map.of("trainStep", trainStep));
             }
         }
         return totalAbsError / batch.size();
