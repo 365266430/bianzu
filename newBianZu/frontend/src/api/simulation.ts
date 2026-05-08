@@ -3,6 +3,7 @@ import type { EnemyNode } from '@/model/enemy'
 import type { ProtectionZone } from '@/model/protectionZone'
 import type { ApiResponse } from '@/model/response'
 import type { SimulationSnapshot } from '@/model/simulation'
+import type { WeaponNode } from '@/model/weaponNode'
 
 export const simApi = {
   async toggleSimulation(action: 'start' | 'stop') {
@@ -91,6 +92,36 @@ export const simApi = {
       return await request.post<any, string>('/weapon/init-nodes')
     } catch (error) {
       console.error('Failed to init weapon nodes:', error)
+      throw error
+    }
+  },
+
+  async updateAllWeaponStatus(status: 0 | 1 | 2) {
+    try {
+      return await request.put<{ status: number }, ApiResponse<WeaponNode[]>>('/weapon/nodes/status', { status })
+    } catch (error) {
+      console.error('Failed to update weapon statuses:', error)
+      throw error
+    }
+  },
+
+  async updateWeaponStatus(weaponId: string, status: 0 | 1 | 2) {
+    try {
+      return await request.put<{ status: number }, ApiResponse<WeaponNode[]>>(
+        `/weapon/node/${encodeURIComponent(weaponId)}/status`,
+        { status },
+      )
+    } catch (error) {
+      console.error('Failed to update weapon status:', error)
+      throw error
+    }
+  },
+
+  async autoAssignWeaponsToZones() {
+    try {
+      return await request.post<any, ProtectionZone[]>('/zone/auto-assign-weapons')
+    } catch (error) {
+      console.error('Failed to auto assign weapons to zones:', error)
       throw error
     }
   },

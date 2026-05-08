@@ -10,6 +10,8 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
+import java.util.Map;
 
 @Service
 public class DqnModelPersistenceService {
@@ -58,6 +60,26 @@ public class DqnModelPersistenceService {
         } catch (IOException e) {
             System.err.println("Delete DQN model failed: " + e.getMessage());
             return false;
+        }
+    }
+
+    public synchronized Map<String, Object> modelFileStatus() {
+        try {
+            boolean exists = Files.exists(MODEL_PATH);
+            return Map.of(
+                    "path", MODEL_PATH.toAbsolutePath().toString(),
+                    "exists", exists,
+                    "sizeBytes", exists ? Files.size(MODEL_PATH) : 0L,
+                    "lastModified", exists ? Files.getLastModifiedTime(MODEL_PATH).toInstant().toString() : "",
+                    "checkedAt", Instant.now().toString()
+            );
+        } catch (IOException e) {
+            return Map.of(
+                    "path", MODEL_PATH.toAbsolutePath().toString(),
+                    "exists", false,
+                    "error", e.getMessage(),
+                    "checkedAt", Instant.now().toString()
+            );
         }
     }
 }

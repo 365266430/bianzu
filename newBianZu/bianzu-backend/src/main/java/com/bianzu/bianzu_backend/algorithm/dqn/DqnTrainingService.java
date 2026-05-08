@@ -6,6 +6,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Map;
 
 @Service
 public class DqnTrainingService {
@@ -24,6 +25,7 @@ public class DqnTrainingService {
 
     private int trainStep = 0;
     private DqnScoredAction lastEpisodeAction;
+    private Map<String, Object> lastProcessorStatus = Map.of("reason", "not_started");
 
     public void observeImmediate(DqnScoredAction scoredAction, boolean invalidAction, double learningRate, int batchSize) {
         observeImmediate(scoredAction, invalidAction, learningRate, batchSize, 10);
@@ -106,6 +108,44 @@ public class DqnTrainingService {
 
     public int replaySize() {
         return replayBuffer.size();
+    }
+
+    public synchronized int trainStep() {
+        return trainStep;
+    }
+
+    public synchronized boolean hasPendingEpisodeAction() {
+        return lastEpisodeAction != null;
+    }
+
+    public synchronized Map<String, Object> trainingStatus() {
+        return Map.of(
+                "replaySize", replayBuffer.size(),
+                "trainStep", trainStep,
+                "hasPendingEpisodeAction", lastEpisodeAction != null,
+                "lastProcessorStatus", lastProcessorStatus
+        );
+    }
+
+    public synchronized void recordProcessorStatus(
+            int step,
+            int enemyCount,
+            int weaponCount,
+            int availableWeaponCount,
+            int validEnemyCount,
+            int candidateCount,
+            int rankedActionCount,
+            String reason) {
+        lastProcessorStatus = Map.of(
+                "step", step,
+                "enemyCount", enemyCount,
+                "weaponCount", weaponCount,
+                "availableWeaponCount", availableWeaponCount,
+                "validEnemyCount", validEnemyCount,
+                "candidateCount", candidateCount,
+                "rankedActionCount", rankedActionCount,
+                "reason", reason == null ? "" : reason
+        );
     }
 
     public synchronized void resetTrainingState(boolean deleteSavedModel) {

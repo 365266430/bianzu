@@ -61,6 +61,7 @@ public class DynamicFormationProcessor implements SimulationProcessor {
         FormationParadigm paradigm = context.getParadigm();
         List<ProtectionZone> safeZones = safeList(zones);
         Map<String, ProtectionZone> zoneByWeaponId = buildZoneByWeaponId(safeZones);
+        releaseAssignedWeapons(weapons);
         Map<String, FireType> fireTypeMap = fireTypeService.getFireTypes().stream()
                 .filter(Objects::nonNull)
                 .filter(item -> item.getType() != null)
@@ -96,6 +97,14 @@ public class DynamicFormationProcessor implements SimulationProcessor {
 
         // 6. 更新武器状态并扣减弹药
         applyAssignments(weapons, assignments);
+    }
+
+    private void releaseAssignedWeapons(List<WeaponNode> weapons) {
+        for (WeaponNode weapon : safeList(weapons)) {
+            if (Objects.equals(weapon.getStatus(), 1)) {
+                weapon.setStatus(0);
+            }
+        }
     }
 
     /**

@@ -46,6 +46,40 @@ public class WeaponNodeService {
         redisTemplate.opsForValue().set(KEY_BLUE_WEAPONS, nodes);
     }
 
+    public List<WeaponNode> updateWeaponStatus(String weaponId, Integer status) {
+        validateStatus(status);
+        if (weaponId == null || weaponId.isBlank()) {
+            throw new IllegalArgumentException("Weapon id cannot be empty");
+        }
+
+        List<WeaponNode> nodes = new ArrayList<>(getAllWeapons());
+        boolean updated = false;
+        for (WeaponNode node : nodes) {
+            if (weaponId.equals(node.getId())) {
+                node.setStatus(status);
+                updated = true;
+                break;
+            }
+        }
+
+        if (!updated) {
+            throw new IllegalArgumentException("Weapon not found: " + weaponId);
+        }
+
+        saveAllWeapons(nodes);
+        return nodes;
+    }
+
+    public List<WeaponNode> updateAllWeaponStatus(Integer status) {
+        validateStatus(status);
+        List<WeaponNode> nodes = new ArrayList<>(getAllWeapons());
+        for (WeaponNode node : nodes) {
+            node.setStatus(status);
+        }
+        saveAllWeapons(nodes);
+        return nodes;
+    }
+
     public void initWeapons() {
         if (weaponTypeService.getWeaponByType("HQ-9_Launcher") == null) {
             throw new RuntimeException("请先初始化 WeaponUnit 模板库！");
@@ -82,5 +116,11 @@ public class WeaponNodeService {
     public void clearAllWeapons() {
         weaponNodeRepository.deleteAll();
         redisTemplate.delete(KEY_BLUE_WEAPONS);
+    }
+
+    private void validateStatus(Integer status) {
+        if (status == null || status < 0 || status > 2) {
+            throw new IllegalArgumentException("Weapon status must be 0, 1, or 2");
+        }
     }
 }

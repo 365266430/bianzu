@@ -1,8 +1,10 @@
 package com.bianzu.bianzu_backend.controller;
 
 import com.bianzu.bianzu_backend.algorithm.dqn.DqnTrainingService;
+import com.bianzu.bianzu_backend.algorithm.dqn.DqnModelPersistenceService;
 import com.bianzu.bianzu_backend.common.Result;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -11,11 +13,14 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.Map;
 
 @RestController
-@RequestMapping("/api/dqn")
+@RequestMapping({"/dqn", "/api/dqn"})
 public class DqnController {
 
     @Autowired
     private DqnTrainingService dqnTrainingService;
+
+    @Autowired
+    private DqnModelPersistenceService dqnModelPersistenceService;
 
     @PostMapping("/reset")
     public Result<Map<String, Object>> reset(@RequestParam(defaultValue = "true") boolean deleteSavedModel) {
@@ -24,6 +29,32 @@ public class DqnController {
                 "reset", true,
                 "deleteSavedModel", deleteSavedModel,
                 "replaySize", dqnTrainingService.replaySize()
+        ));
+    }
+
+    @GetMapping("/status")
+    public Result<Map<String, Object>> status() {
+        return Result.success(Map.of(
+                "training", dqnTrainingService.trainingStatus(),
+                "modelFile", dqnModelPersistenceService.modelFileStatus()
+        ));
+    }
+
+    @PostMapping("/train-batch")
+    public Result<Map<String, Object>> trainBatch(
+            @RequestParam(defaultValue = "32") int batchSize,
+            @RequestParam(defaultValue = "0.001") double learningRate,
+            @RequestParam(defaultValue = "0.95") double gamma,
+            @RequestParam(defaultValue = "10") int targetUpdateFreq) {
+        double avgAbsError = dqnTrainingService.trainBatch(batchSize, learningRate, gamma, targetUpdateFreq);
+        return Result.success(Map.of(
+                "avgAbsError", avgAbsError,
+                "batchSize", batchSize,
+                "learningRate", learningRate,
+                "gamma", gamma,
+                "targetUpdateFreq", targetUpdateFreq,
+                "replaySize", dqnTrainingService.replaySize(),
+                "trainStep", dqnTrainingService.trainStep()
         ));
     }
 }

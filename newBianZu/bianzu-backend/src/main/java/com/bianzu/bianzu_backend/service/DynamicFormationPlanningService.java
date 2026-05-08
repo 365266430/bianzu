@@ -2,7 +2,6 @@ package com.bianzu.bianzu_backend.service;
 
 import com.bianzu.bianzu_backend.algorithm.dqn.DqnFeatureBuilder;
 import com.bianzu.bianzu_backend.algorithm.dqn.DqnPolicyService;
-import com.bianzu.bianzu_backend.algorithm.dqn.DqnTrainingService;
 import com.bianzu.bianzu_backend.algorithm.dqn.model.DqnAction;
 import com.bianzu.bianzu_backend.algorithm.dqn.model.DqnFeatureVector;
 import com.bianzu.bianzu_backend.algorithm.dqn.model.DqnScoredAction;
@@ -40,9 +39,6 @@ public class DynamicFormationPlanningService {
 
     @Autowired
     private DqnPolicyService dqnPolicyService;
-
-    @Autowired
-    private DqnTrainingService dqnTrainingService;
 
     /**
      * 生成动态编组方案
@@ -513,14 +509,8 @@ public class DynamicFormationPlanningService {
                 ? 6 : constraints.getMaxGroupSize();
         double minInterceptionRate = clamp(defaultDouble(constraints.getMinInterceptionRate()), 0D, 1D);
         Set<String> allowedDomains = resolveAllowedDomains(request.getParadigm());
-        double learningRate = request.getConfig() == null || request.getConfig().getLearningRate() == null
-                ? 0.001D : request.getConfig().getLearningRate();
         double epsilon = request.getConfig() == null || request.getConfig().getEpsilon() == null
                 ? 0.1D : request.getConfig().getEpsilon();
-        int batchSize = request.getConfig() == null || request.getConfig().getBatchSize() == null
-                ? 32 : request.getConfig().getBatchSize();
-        int targetUpdateFreq = request.getConfig() == null || request.getConfig().getTargetUpdateFreq() == null
-                ? 10 : request.getConfig().getTargetUpdateFreq();
         int totalAmmo = availableWeapons.stream()
                 .flatMap(weapon -> safeList(weapon.getAmmoStates()).stream())
                 .mapToInt(ammo -> ammo.getCurrentCount() == null ? 0 : ammo.getCurrentCount())
@@ -605,7 +595,6 @@ public class DynamicFormationPlanningService {
         }
         List<ScoredCandidate> scoredCandidates = new ArrayList<>();
         for (DqnScoredAction rankedAction : rankedActions) {
-            dqnTrainingService.observeImmediate(rankedAction, false, learningRate, batchSize, targetUpdateFreq);
             ScoredCandidate candidate = candidateByAction.get(rankedAction);
             if (candidate != null) {
                 scoredCandidates.add(new ScoredCandidate(

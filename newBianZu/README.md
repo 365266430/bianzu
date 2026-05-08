@@ -66,7 +66,7 @@ input feature vector -> hidden layer(32, ReLU) -> output(sigmoid Q)
 
 | 文件 | 接入内容 |
 | --- | --- |
-| `service/DynamicFormationPlanningService.java` | 接口生成动态编组方案时，候选动作通过 `DqnPolicyService` 评分，并调用 `DqnTrainingService` 在线更新 |
+| `service/DynamicFormationPlanningService.java` | 接口生成动态编组方案时，候选动作通过 `DqnPolicyService` 评分；该接口现在默认只推理，不训练 |
 | `processor/DynamicFormationProcessor.java` | 仿真 tick 中，候选动作通过 `DqnPolicyService` 评分；排名最高动作接入跨 tick episode 经验链，其他候选作为即时经验补充训练 |
 
 ## 1. 建模目标
@@ -551,6 +551,23 @@ deleteSavedModel=false 时，只重置内存训练状态，不删除本地模型
 ```text
 POST http://localhost:8080/api/dqn/reset
 POST http://localhost:8080/api/dqn/reset?deleteSavedModel=false
+```
+
+当前训练与状态接口：
+
+```text
+GET /api/dqn/status
+查看 replaySize、trainStep、是否存在已保存模型文件
+
+POST /api/dqn/train-batch
+从 ReplayBuffer 中采样一批经验进行显式训练
+```
+
+示例：
+
+```text
+GET http://localhost:8080/api/dqn/status
+POST http://localhost:8080/api/dqn/train-batch?batchSize=32&learningRate=0.001&gamma=0.95&targetUpdateFreq=10
 ```
 
 当前 episode 经验链：

@@ -2,6 +2,7 @@ package com.bianzu.bianzu_backend.service;
 
 import com.alibaba.fastjson2.JSON;
 import com.bianzu.bianzu_backend.model.ProtectionZone;
+import com.bianzu.bianzu_backend.model.WeaponNode;
 import com.bianzu.bianzu_backend.model.WeaponType;
 import com.bianzu.bianzu_backend.repository.ProtectionZoneRepository;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -25,6 +26,9 @@ public class ProtectionZoneService {
 
     @Autowired
     private WeaponTypeService weaponService;
+
+    @Autowired
+    private WeaponNodeService weaponNodeService;
 
     public void initProtectionZones() {
         WeaponType hq9Launcher = weaponService.getWeaponByType("HQ-9_Launcher");
@@ -53,6 +57,8 @@ public class ProtectionZoneService {
         zoneSh.setHealth(10);
         zoneSh.setStationedWeaponIds(new ArrayList<>());
         zones.add(zoneSh);
+
+        assignWeaponsEvenly(zones, weaponNodeService.getAllWeapons());
 
         saveAllZones(zones);
         System.out.println(">>> Protection zones initialized: " + zones.size());
@@ -166,6 +172,45 @@ public class ProtectionZoneService {
 
         saveAllZones(allZones);
         return true;
+    }
+
+    public List<ProtectionZone> autoAssignWeaponsToZones() {
+        List<ProtectionZone> zones = new ArrayList<>(getAllZones());
+        if (zones.isEmpty()) {
+            throw new IllegalStateException("No protection zone data found");
+        }
+
+        List<WeaponNode> weapons = weaponNodeService.getAllWeapons();
+        assignWeaponsEvenly(zones, weapons);
+        saveAllZones(zones);
+        return zones;
+    }
+
+    private void assignWeaponsEvenly(List<ProtectionZone> zones, List<WeaponNode> weapons) {
+        if (zones == null || zones.isEmpty()) {
+            return;
+        }
+
+        for (ProtectionZone zone : zones) {
+            if (zone.getStationedWeaponIds() == null) {
+                zone.setStationedWeaponIds(new ArrayList<>());
+            } else {
+                zone.getStationedWeaponIds().clear();
+            }
+        }
+
+        if (weapons == null || weapons.isEmpty()) {
+            return;
+        }
+
+        int zoneIndex = 0;
+        for (WeaponNode weapon : weapons) {
+            if (weapon == null || weapon.getId() == null || weapon.getId().isBlank()) {
+                continue;
+            }
+            zones.get(zoneIndex % zones.size()).getStationedWeaponIds().add(weapon.getId());
+            zoneIndex++;
+        }
     }
 
     private void normalizeZone(ProtectionZone zone) {

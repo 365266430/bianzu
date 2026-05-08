@@ -6,6 +6,7 @@ import { useResStore } from '@/stores/resource'
 import { wsClient } from '@/utils/websocket'
 import type { EnemyNode } from '@/model/enemy'
 import type { ProtectionZone } from '@/model/protectionZone'
+import type { WeaponNode } from '@/model/weaponNode'
 import type {
   DynamicAlgorithmConfig,
   DynamicEnemyNode,
@@ -20,13 +21,17 @@ const resStore = useResStore()
 const loading = ref(false)
 const resetLoading = ref(false)
 const dataLoading = ref(false)
+const weaponStatusLoading = ref(false)
+const zoneAssignLoading = ref(false)
 const error = ref('')
 const notice = ref('')
+const dqnStatus = ref<Record<string, any> | null>(null)
 const activeTab = ref<'request' | 'result'>('request')
 const result = ref<DynamicFormationResult | null>(null)
 
 const enemyNodes = ref<EnemyNode[]>([])
 const zones = ref<ProtectionZone[]>([])
+const weaponNodes = ref<WeaponNode[]>([])
 
 const paradigmOptions = ref<string[]>([
   'ALL',
@@ -71,6 +76,18 @@ const zoneRows = computed(() => zones.value.map(item => ({
   value: Number(item.value ?? 0),
   stationedWeaponCount: Array.isArray(item.stationedWeaponIds) ? item.stationedWeaponIds.length : 0,
 })))
+
+const weaponNodeRows = computed(() => weaponNodes.value.map(item => ({
+  id: String(item.id),
+  type: String(item.type ?? ''),
+  status: Number(item.status ?? 0),
+  statusText: weaponStatusLabel(Number(item.status ?? 0)),
+  ammoText: Array.isArray(item.ammoStates)
+    ? item.ammoStates.map(ammo => `${ammo.fireUnitType}:${ammo.currentCount}`).join(', ')
+    : '',
+})))
+
+const idleWeaponCount = computed(() => weaponNodeRows.value.filter(item => item.status === 0).length)
 
 const summaryCards = computed(() => {
   if (!result.value) {
@@ -174,6 +191,13 @@ function domainLabel(value: string) {
   }[value] ?? value
 }
 
+function weaponStatusLabel(status: number) {
+  if (status === 0) return '待命'
+  if (status === 1) return '分配中'
+  if (status === 2) return '被调度分配'
+  return `Unknown(${status})`
+}
+
 function keepSelectionValid() {
   const weaponTypeSet = new Set(weaponTypeRows.value.map(item => String(item.type)))
   const enemySet = new Set(enemyRows.value.map(item => item.id))
@@ -195,9 +219,11 @@ function clearSelection() {
 }
 
 function applySnapshot(payload: {
+  weaponNodes?: WeaponNode[]
   enemyNodes?: EnemyNode[]
   zones?: ProtectionZone[]
 }, autoSelect = false) {
+  weaponNodes.value = Array.isArray(payload.weaponNodes) ? payload.weaponNodes : []
   enemyNodes.value = Array.isArray(payload.enemyNodes) ? payload.enemyNodes : []
   zones.value = Array.isArray(payload.zones) ? payload.zones : []
   keepSelectionValid()
@@ -350,11 +376,91 @@ async function resetDqn() {
       return
     }
     result.value = null
+    dqnStatus.value = response.data ?? null
     notice.value = 'DQN 已重置，经验池和本地模型已清空。'
   } catch (requestError: any) {
     error.value = requestError?.message || 'DQN 重置失败'
   } finally {
     resetLoading.value = false
+  }
+}
+
+async function loadDqnStatus() {
+  error.value = ''
+  notice.value = ''
+  resetLoading.value = true
+  try {
+    const response = await formationApi.getDqnStatus()
+    if (response?.code !== 200) {
+      error.value = response?.message || 'DQN 状态读取失败'
+      return
+    }
+    dqnStatus.value = response.data ?? null
+    const replaySize = dqnStatus.value?.training?.replaySize ?? 0
+    const trainStep = dqnStatus.value?.training?.trainStep ?? 0
+    const modelExists = dqnStatus.value?.modelFile?.exists ? '已保存' : '未保存'
+    notice.value = `DQN 状态：经验 ${replaySize}，训练步 ${trainStep}，模型${modelExists}。`
+  } catch (requestError: any) {
+    error.value = requestError?.message || 'DQN 状态读取失败'
+  } finally {
+    resetLoading.value = false
+  }
+}
+
+async function updateAllWeaponStatus(status: 0 | 1 | 2) {
+  error.value = ''
+  notice.value = ''
+  weaponStatusLoading.value = true
+  try {
+    const response = await simApi.updateAllWeaponStatus(status)
+    if (response?.code !== 200 || !Array.isArray(response.data)) {
+      error.value = response?.message || '武器状态更新失败'
+      return
+    }
+    weaponNodes.value = response.data
+    notice.value = `武器状态已设为 ${weaponStatusLabel(status)}.`
+  } catch (requestError: any) {
+    error.value = requestError?.message || '武器状态更新失败'
+  } finally {
+    weaponStatusLoading.value = false
+  }
+}
+
+async function updateWeaponStatus(weaponId: string, status: 0 | 1 | 2) {
+  error.value = ''
+  notice.value = ''
+  weaponStatusLoading.value = true
+  try {
+    const response = await simApi.updateWeaponStatus(weaponId, status)
+    if (response?.code !== 200 || !Array.isArray(response.data)) {
+      error.value = response?.message || '武器状态更新失败'
+      return
+    }
+    weaponNodes.value = response.data
+    notice.value = `Weapon ${weaponId} set to ${weaponStatusLabel(status)}.`
+  } catch (requestError: any) {
+    error.value = requestError?.message || '武器状态更新失败'
+  } finally {
+    weaponStatusLoading.value = false
+  }
+}
+
+async function autoAssignWeaponsToZones() {
+  error.value = ''
+  notice.value = ''
+  zoneAssignLoading.value = true
+  try {
+    const response = await simApi.autoAssignWeaponsToZones()
+    if (!Array.isArray(response)) {
+      error.value = '自动分配失败'
+      return
+    }
+    zones.value = response
+    notice.value = '武器已分配给保护区.'
+  } catch (requestError: any) {
+    error.value = requestError?.message || '自动分配失败'
+  } finally {
+    zoneAssignLoading.value = false
   }
 }
 
@@ -484,6 +590,20 @@ onUnmounted(() => {
           <button class="reset-btn" type="button" :disabled="loading || resetLoading" @click="resetDqn">
             {{ resetLoading ? '重置中...' : '重置 DQN' }}
           </button>
+          <button class="status-btn" type="button" :disabled="loading || resetLoading" @click="loadDqnStatus">
+            状态
+          </button>
+        </div>
+        <div class="primary-actions secondary-actions">
+          <button class="status-btn" type="button" :disabled="loading || weaponStatusLoading" @click="updateAllWeaponStatus(0)">
+            全部待命
+          </button>
+          <button class="status-btn" type="button" :disabled="loading || weaponStatusLoading" @click="updateAllWeaponStatus(1)">
+            全部分配中
+          </button>
+          <button class="status-btn" type="button" :disabled="loading || zoneAssignLoading" @click="autoAssignWeaponsToZones">
+            自动驻防
+          </button>
         </div>
         <p v-if="notice" class="notice-text">{{ notice }}</p>
         <p v-if="error" class="error-text">{{ error }}</p>
@@ -510,6 +630,41 @@ onUnmounted(() => {
           </div>
 
           <div class="select-grid">
+            <article class="select-card">
+              <header>
+                <h4>武器节点</h4>
+                <span>{{ idleWeaponCount }} / {{ weaponNodeRows.length }} Idle</span>
+              </header>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>类型</th>
+                      <th>状态</th>
+                      <th>弹药</th>
+                      <th>操作</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="row in weaponNodeRows" :key="row.id">
+                      <td>{{ row.id }}</td>
+                      <td>{{ row.type }}</td>
+                      <td>{{ row.statusText }}</td>
+                      <td>{{ row.ammoText }}</td>
+                      <td>
+                        <button type="button" class="mini-btn" :disabled="weaponStatusLoading" @click="updateWeaponStatus(row.id, 0)">0</button>
+                        <button type="button" class="mini-btn" :disabled="weaponStatusLoading" @click="updateWeaponStatus(row.id, 1)">1</button>
+                        <button type="button" class="mini-btn" :disabled="weaponStatusLoading" @click="updateWeaponStatus(row.id, 2)">2</button>
+                      </td>
+                    </tr>
+                    <tr v-if="!weaponNodeRows.length">
+                      <td colspan="5" class="empty-row">暂无武器节点</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </article>
             <article class="select-card">
               <header>
                 <h4>武器类型</h4>
@@ -834,6 +989,7 @@ onUnmounted(() => {
 
 .generate-btn,
 .reset-btn,
+.status-btn,
 .tab-btn {
   border: none;
   cursor: pointer;
@@ -847,7 +1003,8 @@ onUnmounted(() => {
 }
 
 .generate-btn,
-.reset-btn {
+.reset-btn,
+.status-btn {
   width: 100%;
   padding: 12px 16px;
   border-radius: 14px;
@@ -859,15 +1016,42 @@ onUnmounted(() => {
   background: linear-gradient(135deg, var(--blue-1), var(--blue-2));
 }
 
-.reset-btn {
+.reset-btn,
+.status-btn {
   min-width: 104px;
   color: #17384f;
   border: 1px solid #b8cad8;
   background: #f2f7fb;
 }
 
+.status-btn {
+  min-width: 72px;
+}
+
+.secondary-actions {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 10px;
+}
+
+.mini-btn {
+  margin-right: 6px;
+  border: 1px solid #bfd0df;
+  background: #f4f8fc;
+  color: #22445f;
+  border-radius: 8px;
+  cursor: pointer;
+  padding: 4px 8px;
+  font-weight: 700;
+}
+
+.mini-btn:disabled {
+  opacity: 0.7;
+  cursor: wait;
+}
+
 .generate-btn:disabled,
-.reset-btn:disabled {
+.reset-btn:disabled,
+.status-btn:disabled {
   opacity: 0.7;
   cursor: wait;
 }
