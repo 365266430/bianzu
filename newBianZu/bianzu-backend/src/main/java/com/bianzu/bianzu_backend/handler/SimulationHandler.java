@@ -27,6 +27,7 @@ public class SimulationHandler extends TextWebSocketHandler {
     // 2. 直接注入数据层 Service
     @Autowired
     private EnemyNodeService enemyService;
+
     @Autowired
     private ProtectionZoneService zoneService;
 

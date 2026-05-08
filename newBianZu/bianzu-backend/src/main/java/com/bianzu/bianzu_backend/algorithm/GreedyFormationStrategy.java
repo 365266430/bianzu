@@ -26,6 +26,6 @@ public class GreedyFormationStrategy implements FormationStrategy {
                                                   List<EnemyNode> enemies,
                                                   List<ProtectionZone> zones,
                                                   AlgorithmConfigDTO config) {
-        return planningService.buildReport("greedyFormationStrategy", weapons, enemies, zones, config);
+        return planningService.buildGreedyReport(weapons, enemies, zones, config);
     }
 }

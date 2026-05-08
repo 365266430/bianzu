@@ -9,6 +9,7 @@ import com.bianzu.bianzu_backend.model.ProtectionZone;
 import com.bianzu.bianzu_backend.model.SimulationContext;
 import com.bianzu.bianzu_backend.model.WeaponNode;
 import com.bianzu.bianzu_backend.processor.DynamicFormationProcessor;
+import com.bianzu.bianzu_backend.processor.CombatProcessor;
 import com.bianzu.bianzu_backend.processor.MovementProcessor;
 import com.bianzu.bianzu_backend.processor.SimulationProcessor;
 import jakarta.annotation.PostConstruct;
@@ -39,8 +40,8 @@ public class SimulationEngineService {
     private MovementProcessor movementProcessor;
     @Autowired
     private DynamicFormationProcessor dynamicFormationProcessor;
-//    @Autowired
-//    private CombatProcessor combatProcessor;
+    @Autowired
+    private CombatProcessor combatProcessor;
 
     // 处理器链表 (流水线)
     private List<SimulationProcessor> processors;
@@ -51,7 +52,7 @@ public class SimulationEngineService {
         processors = new ArrayList<>();
         processors.add(movementProcessor);
         processors.add(dynamicFormationProcessor);
-        // processors.add(combatProcessor); // 想加功能？加一行就行
+        processors.add(combatProcessor);
     }
 
     // 仿真开关

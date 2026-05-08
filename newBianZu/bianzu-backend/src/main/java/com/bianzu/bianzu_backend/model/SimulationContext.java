@@ -12,6 +12,7 @@ public class SimulationContext {
     private List<EnemyNode> enemies;
     private List<WeaponNode> weapons;
     private List<ProtectionZone> zones;
+    private List<CombatEngagement> engagements;
     private FormationParadigm paradigm;
     private int step;
 }

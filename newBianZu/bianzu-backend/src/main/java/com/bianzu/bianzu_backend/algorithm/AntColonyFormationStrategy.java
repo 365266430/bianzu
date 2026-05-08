@@ -26,6 +26,6 @@ public class AntColonyFormationStrategy implements FormationStrategy {
                                                   List<EnemyNode> enemies,
                                                   List<ProtectionZone> zones,
                                                   AlgorithmConfigDTO config) {
-        return planningService.buildReport("antColonyFormationStrategy", weapons, enemies, zones, config);
+        return planningService.buildAntColonyReport(weapons, enemies, zones, config);
     }
 }

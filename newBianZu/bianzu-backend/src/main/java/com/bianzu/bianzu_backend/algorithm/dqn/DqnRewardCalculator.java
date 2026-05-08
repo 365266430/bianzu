@@ -21,4 +21,12 @@ public class DqnRewardCalculator {
         }
         return reward;
     }
+
+    public double estimateCombatReward(DqnFeatureVector vector, boolean destroyed, boolean invalidAction) {
+        double baseReward = estimateImmediateReward(vector, invalidAction);
+        if (invalidAction) {
+            return baseReward - 1D;
+        }
+        return destroyed ? baseReward + 3D : baseReward - 1.5D;
+    }
 }

@@ -43,6 +43,34 @@ public class StaticFormationPlanningService {
     @Autowired
     private EnemyTypeService enemyTypeService;
 
+    public StaticFormationResultDTO buildGreedyReport(List<WeaponNode> weapons,
+                                                      List<EnemyNode> enemies,
+                                                      List<ProtectionZone> zones,
+                                                      AlgorithmConfigDTO config) {
+        return buildReport("greedyFormationStrategy", weapons, enemies, zones, config);
+    }
+
+    public StaticFormationResultDTO buildGeneticReport(List<WeaponNode> weapons,
+                                                       List<EnemyNode> enemies,
+                                                       List<ProtectionZone> zones,
+                                                       AlgorithmConfigDTO config) {
+        return buildReport("geneticFormationStrategy", weapons, enemies, zones, config);
+    }
+
+    public StaticFormationResultDTO buildPsoReport(List<WeaponNode> weapons,
+                                                  List<EnemyNode> enemies,
+                                                  List<ProtectionZone> zones,
+                                                  AlgorithmConfigDTO config) {
+        return buildReport("psoFormationStrategy", weapons, enemies, zones, config);
+    }
+
+    public StaticFormationResultDTO buildAntColonyReport(List<WeaponNode> weapons,
+                                                         List<EnemyNode> enemies,
+                                                         List<ProtectionZone> zones,
+                                                         AlgorithmConfigDTO config) {
+        return buildReport("antColonyFormationStrategy", weapons, enemies, zones, config);
+    }
+
     public StaticFormationResultDTO buildReport(String algorithmType,
                                                 List<WeaponNode> weapons,
                                                 List<EnemyNode> enemies,

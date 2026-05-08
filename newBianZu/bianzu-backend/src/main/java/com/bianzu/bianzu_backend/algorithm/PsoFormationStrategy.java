@@ -26,6 +26,6 @@ public class PsoFormationStrategy implements FormationStrategy {
                                                   List<EnemyNode> enemies,
                                                   List<ProtectionZone> zones,
                                                   AlgorithmConfigDTO config) {
-        return planningService.buildReport("psoFormationStrategy", weapons, enemies, zones, config);
+        return planningService.buildPsoReport(weapons, enemies, zones, config);
     }
 }

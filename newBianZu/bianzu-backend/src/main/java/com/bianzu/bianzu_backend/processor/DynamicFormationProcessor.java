@@ -102,7 +102,7 @@ public class DynamicFormationProcessor implements SimulationProcessor {
 
         // 5. 生成武器-目标分配方案（增强版：考虑敌方威胁属性）
         List<WeaponFireAssignment> assignments = generateAssignmentsEnhanced(
-                candidates, availableWeapons, paradigm, inZoneStatus, enemyById, fireTypeMap, zoneByWeaponId, safeZones);
+                candidates, availableWeapons, paradigm, inZoneStatus, enemyById, fireTypeMap, zoneByWeaponId, safeZones, context);
 
         // 6. 更新武器状态并扣减弹药
         applyAssignments(weapons, safeZones, assignments);
@@ -240,7 +240,8 @@ public class DynamicFormationProcessor implements SimulationProcessor {
             Map<String, EnemyNode> enemyById,
             Map<String, FireType> fireTypeMap,
             Map<String, ProtectionZone> zoneByWeaponId,
-            List<ProtectionZone> zones) {
+            List<ProtectionZone> zones,
+            SimulationContext context) {
         if (candidates.isEmpty()) {
             return new ArrayList<>();
         }
@@ -285,7 +286,7 @@ public class DynamicFormationProcessor implements SimulationProcessor {
             Double distanceKm = computeDistanceKm(sourceZone, enemy);
             double rangeKm = Math.max(defaultDouble(fireType.getMaxRange()) / 1000D, 1D);
             double distanceScore = distanceKm == null ? 0.55D : clamp(1D - distanceKm / rangeKm, 0D, 1D);
-            double ammoScore = computeAmmoScore(candidate.getWeaponId(), candidate.getFireType());
+            double ammoScore = computeAmmoScore(candidate.getWeaponId(), candidate.getFireType(), availableWeapons);
             double costScore = computeCostScore(fireType, distanceKm);
 
             // 综合评分
@@ -335,23 +336,14 @@ public class DynamicFormationProcessor implements SimulationProcessor {
             candidateByAction.put(pendingCandidate.scoredAction(), pendingCandidate);
         }
         List<ThreatScoredAssignment> scored = new ArrayList<>();
-        boolean trainingEnabled = dqnRuntimeConfigService.isTrainingEnabled();
-        boolean episodeStepObserved = false;
         for (DqnScoredAction rankedAction : rankedActions) {
-            if (trainingEnabled) {
-                if (!episodeStepObserved) {
-                    dqnTrainingService.observeEpisodeStep(rankedAction, false, 0.001D, 32, 0.95D, 10);
-                    episodeStepObserved = true;
-                } else {
-                    dqnTrainingService.observeImmediate(rankedAction, false, 0.001D, 32, 10);
-                }
-            }
             PendingThreatCandidate pendingCandidate = candidateByAction.get(rankedAction);
             if (pendingCandidate != null) {
                 scored.add(new ThreatScoredAssignment(
                         pendingCandidate.assignment(),
                         rankedAction.getQValue() == null ? 0D : rankedAction.getQValue(),
-                        pendingCandidate.threatScore()));
+                        pendingCandidate.threatScore(),
+                        rankedAction));
             }
         }
 
@@ -359,6 +351,7 @@ public class DynamicFormationProcessor implements SimulationProcessor {
         Set<String> usedWeapons = new HashSet<>();
         Set<String> usedEnemies = new HashSet<>();
         List<WeaponFireAssignment> assignments = new ArrayList<>();
+        List<CombatEngagement> engagements = new ArrayList<>();
 
         for (ThreatScoredAssignment s : scored) {
             WeaponFireAssignment candidate = s.assignment();
@@ -366,13 +359,22 @@ public class DynamicFormationProcessor implements SimulationProcessor {
                 continue;
             }
             // 检查库存限制：低库存弹药只能用于高威胁目标
-            if (!canUseScarceAmmo(candidate.getWeaponId(), candidate.getFireType(), s.threatScore())) {
+            if (!canUseScarceAmmo(candidate.getWeaponId(), candidate.getFireType(), s.threatScore(), availableWeapons)) {
                 continue;
             }
             usedWeapons.add(candidate.getWeaponId());
             usedEnemies.add(candidate.getEnemyId());
             assignments.add(candidate);
+            FireType fireType = fireTypeMap.get(candidate.getFireType());
+            engagements.add(new CombatEngagement(
+                    candidate.getWeaponId(),
+                    candidate.getEnemyId(),
+                    candidate.getFireType(),
+                    candidate.getSourceZoneId(),
+                    fireType == null ? 0D : clamp(defaultDouble(fireType.getInterception()), 0D, 1D),
+                    s.scoredAction()));
         }
+        context.setEngagements(engagements);
         return assignments;
     }
 
@@ -397,10 +399,12 @@ public class DynamicFormationProcessor implements SimulationProcessor {
     /**
      * 计算弹药余量评分（库存多加分，库存少扣分）
      */
-    private double computeAmmoScore(String weaponId, String fireType) {
-        // 需要从 availableWeapons 中查找库存，但这里没有传入
-        // 暂时返回 0.05，后续优化
-        return 0.05D;
+    private double computeAmmoScore(String weaponId, String fireType, List<WeaponNode> availableWeapons) {
+        int currentCount = resolveAmmoCount(weaponId, fireType, availableWeapons);
+        if (currentCount <= 0) {
+            return -0.15D;
+        }
+        return clamp(currentCount / 8D, 0.02D, 0.2D);
     }
 
     /**
@@ -417,9 +421,26 @@ public class DynamicFormationProcessor implements SimulationProcessor {
      * 检查能否使用稀缺弹药（库存 <= 3）
      * 只有高威胁目标（威胁分 > 0.5）才能使用稀缺弹药
      */
-    private boolean canUseScarceAmmo(String weaponId, String fireType, double threatScore) {
-        // 简化判断：如果威胁分 > 0.5，允许使用稀缺弹药
-        return threatScore > 0.5D;
+    private boolean canUseScarceAmmo(String weaponId, String fireType, double threatScore, List<WeaponNode> availableWeapons) {
+        int currentCount = resolveAmmoCount(weaponId, fireType, availableWeapons);
+        if (currentCount > 3) {
+            return true;
+        }
+        return threatScore >= 0.55D;
+    }
+
+    private int resolveAmmoCount(String weaponId, String fireType, List<WeaponNode> availableWeapons) {
+        for (WeaponNode weapon : safeList(availableWeapons)) {
+            if (!Objects.equals(weapon.getId(), weaponId)) {
+                continue;
+            }
+            for (WeaponNode.NodeAmmoState ammo : safeList(weapon.getAmmoStates())) {
+                if (Objects.equals(ammo.getFireUnitType(), fireType)) {
+                    return ammo.getCurrentCount() == null ? 0 : ammo.getCurrentCount();
+                }
+            }
+        }
+        return 0;
     }
 
         private void applyAssignments(List<WeaponNode> weapons, List<ProtectionZone> zones, List<WeaponFireAssignment> assignments) {
@@ -580,7 +601,11 @@ public class DynamicFormationProcessor implements SimulationProcessor {
         return rawDomain.toUpperCase(Locale.ROOT);
     }
 
-    private record ThreatScoredAssignment(WeaponFireAssignment assignment, double score, double threatScore) {
+    private record ThreatScoredAssignment(
+            WeaponFireAssignment assignment,
+            double score,
+            double threatScore,
+            DqnScoredAction scoredAction) {
     }
 
     private record PendingThreatCandidate(

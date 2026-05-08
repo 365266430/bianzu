@@ -54,6 +54,33 @@ public class DqnTrainingService {
         trainBatch(Math.max(batchSize, 1), learningRate, 0.95D, targetUpdateFreq);
     }
 
+    public void observeCombatOutcome(
+            DqnScoredAction scoredAction,
+            boolean destroyed,
+            boolean invalidAction,
+            double learningRate,
+            int batchSize,
+            int targetUpdateFreq) {
+        if (scoredAction == null || scoredAction.getFeatureVector() == null) {
+            return;
+        }
+        double reward = rewardCalculator.estimateCombatReward(scoredAction.getFeatureVector(), destroyed, invalidAction);
+        DqnExperience experience = new DqnExperience(
+                scoredAction.getFeatureVector(),
+                scoredAction.getAction(),
+                reward,
+                null,
+                true);
+        replayBuffer.add(experience);
+        trainingLogService.append("combat_outcome", Map.of(
+                "terminal", true,
+                "destroyed", destroyed,
+                "reward", reward,
+                "action", scoredAction.getAction()
+        ));
+        trainBatch(Math.max(batchSize, 1), learningRate, 0.95D, targetUpdateFreq);
+    }
+
     public synchronized void observeEpisodeStep(
             DqnScoredAction currentAction,
             boolean invalidAction,

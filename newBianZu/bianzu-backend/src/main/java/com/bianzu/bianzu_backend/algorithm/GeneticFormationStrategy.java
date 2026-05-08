@@ -26,6 +26,6 @@ public class GeneticFormationStrategy implements FormationStrategy {
                                                   List<EnemyNode> enemies,
                                                   List<ProtectionZone> zones,
                                                   AlgorithmConfigDTO config) {
-        return planningService.buildReport("geneticFormationStrategy", weapons, enemies, zones, config);
+        return planningService.buildGeneticReport(weapons, enemies, zones, config);
     }
 }

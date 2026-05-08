@@ -36,6 +36,9 @@ public class DynamicFormationPlanningService {
     private WeaponTypeService weaponTypeService;
 
     @Autowired
+    private WeaponNodeService weaponNodeService;
+
+    @Autowired
     private DqnFeatureBuilder dqnFeatureBuilder;
 
     @Autowired
@@ -76,15 +79,15 @@ public class DynamicFormationPlanningService {
                 .filter(item -> item.getType() != null)
                 .collect(Collectors.toMap(WeaponType::getType, item -> item, (left, right) -> left, LinkedHashMap::new));
 
-        Map<String, ProtectionZone> zoneByWeaponId = new LinkedHashMap<>();
-        List<WeaponNode> virtualWeapons = buildVirtualWeapons(request, safeZones, weaponTypeMap, zoneByWeaponId);
+        Map<String, ProtectionZone> zoneByWeaponId = buildZoneByWeaponId(safeZones);
+        List<WeaponNode> selectedWeapons = resolveSelectedActualWeapons(request);
 
         log.info("Dynamic formation planning start | selectedWeaponTypes={} | selectedEnemyIds={} | paradigm={}",
                 request.getSelectedWeaponTypes() == null ? 0 : request.getSelectedWeaponTypes().size(),
                 request.getSelectedEnemyIds() == null ? 0 : request.getSelectedEnemyIds().size(),
                 request.getParadigm());
 
-        List<WeaponNode> availableWeapons = filterAvailableWeapons(virtualWeapons);
+        List<WeaponNode> availableWeapons = filterAvailableWeapons(selectedWeapons);
         List<EnemyNode> validEnemies = filterValidEnemies(request, safeEnemyNodes);
 
         if (availableWeapons.isEmpty() || validEnemies.isEmpty()) {
@@ -121,8 +124,36 @@ public class DynamicFormationPlanningService {
                 zoneByWeaponId);
     }
 
-    // 按“已选武器类型 × 当前保护区”展开虚拟武器节点，
-    // 便于在不依赖真实部署实体的前提下完成动态分配推演。
+    private List<WeaponNode> resolveSelectedActualWeapons(DynamicFormationRequestDTO request) {
+        Set<String> selected = safeList(request.getSelectedWeaponTypes()).stream()
+                .filter(Objects::nonNull)
+                .map(String::trim)
+                .filter(value -> !value.isEmpty())
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        if (selected.isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        List<WeaponNode> allWeapons = safeList(weaponNodeService.getAllWeapons());
+        return allWeapons.stream()
+                .filter(Objects::nonNull)
+                .filter(weapon -> selected.contains(weapon.getId()) || selected.contains(weapon.getType()))
+                .collect(Collectors.toCollection(ArrayList::new));
+    }
+
+    private Map<String, ProtectionZone> buildZoneByWeaponId(List<ProtectionZone> zones) {
+        Map<String, ProtectionZone> zoneByWeaponId = new LinkedHashMap<>();
+        for (ProtectionZone zone : safeList(zones)) {
+            for (String weaponId : safeList(zone.getStationedWeaponIds())) {
+                if (weaponId != null && !weaponId.isBlank()) {
+                    zoneByWeaponId.put(weaponId, zone);
+                }
+            }
+        }
+        return zoneByWeaponId;
+    }
+
+    // Retained as a fallback helper for older experiments, but production planning now uses actual WeaponNode data.
     private List<WeaponNode> buildVirtualWeapons(
             DynamicFormationRequestDTO request,
             List<ProtectionZone> zones,
@@ -618,7 +649,34 @@ public class DynamicFormationPlanningService {
             return new ArrayList<>();
         }
 
-        // 贪心选择阶段：同一武器只分配一次，同一目标也只接收一次主分配。
+        int requestedPlanCount = request.getConfig() == null || request.getConfig().getPlanCount() == null
+                ? 1 : Math.max(request.getConfig().getPlanCount(), 1);
+        int actualPlanCount = Math.min(requestedPlanCount, Math.max(scoredCandidates.size(), 1));
+        List<DynamicFormationResultDTO.DynamicFormationPlanDTO> plans = new ArrayList<>();
+        for (int variant = 0; variant < actualPlanCount; variant++) {
+            List<ScoredCandidate> variantCandidates = new ArrayList<>(scoredCandidates);
+            if (variant > 0 && variant < variantCandidates.size()) {
+                ScoredCandidate promoted = variantCandidates.remove(variant);
+                variantCandidates.add(0, promoted);
+            }
+            plans.add(buildGreedyPlan(
+                    variantCandidates,
+                    availableWeapons,
+                    ammoSufficiency,
+                    maxGroupSize,
+                    request,
+                    variant + 1));
+        }
+        return plans;
+    }
+
+    private DynamicFormationResultDTO.DynamicFormationPlanDTO buildGreedyPlan(
+            List<ScoredCandidate> scoredCandidates,
+            List<WeaponNode> availableWeapons,
+            Map<String, Boolean> ammoSufficiency,
+            int maxGroupSize,
+            DynamicFormationRequestDTO request,
+            int planIndex) {
         Set<String> selectedWeapons = new HashSet<>();
         Set<String> selectedEnemies = new HashSet<>();
         Map<String, Integer> remainingAmmo = buildRemainingAmmoMap(availableWeapons);
@@ -666,7 +724,7 @@ public class DynamicFormationPlanningService {
 
         DynamicFormationResultDTO.DynamicFormationPlanDTO plan = new DynamicFormationResultDTO.DynamicFormationPlanDTO();
         plan.setPlanId(UUID.randomUUID().toString());
-        plan.setPlanName((request.getConfig() == null ? "DQN" : request.getConfig().getAlgorithmType()) + "-HEURISTIC");
+        plan.setPlanName((request.getConfig() == null ? "DQN" : request.getConfig().getAlgorithmType()) + "-PLAN-" + planIndex);
         plan.setFeasible(!details.isEmpty());
         plan.setFitnessScore(round(details.isEmpty() ? 0D : (fitnessScoreTotal / details.size()) * 100D));
         plan.setGroupSize(selectedWeapons.size());
@@ -687,7 +745,7 @@ public class DynamicFormationPlanningService {
         }
         plan.setWarnings(warnings);
         plan.setDetails(details);
-        return new ArrayList<>(List.of(plan));
+        return plan;
     }
 
     private Map<String, Integer> buildRemainingAmmoMap(List<WeaponNode> availableWeapons) {
